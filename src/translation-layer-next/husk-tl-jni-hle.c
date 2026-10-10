@@ -454,6 +454,12 @@ static void System_getProperty(tl_jcall *c) { const char *k = S(c->args[0].l); c
 static void System_currentTimeMillis(tl_jcall *c) { struct timespec ts; clock_gettime(CLOCK_REALTIME, &ts); jvalue v; v.j = (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000; c->ret = v; }
 static void System_nanoTime(tl_jcall *c) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); jvalue v; v.j = (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec; c->ret = v; }
 static void UnityPlayer_initializeGoogleAr(tl_jcall *c) { c->ret = vz(0); }
+/* Unity 6 loads its plugins through UnityPlayer.loadLibrary(name): System.loadLibrary, false instead of the error. */
+static void UnityPlayer_loadLibrary(tl_jcall *c)
+{
+    char base[200]; snprintf(base, sizeof(base), "lib%s.so", S(c->args[0].l));
+    c->ret = vz(load_native_library(base) ? 1 : 0);
+}
 
 /* JNIBridge builds Java proxies for interfaces C# implements. A proxy that never answers is
  * enough until something calls through one. */
@@ -865,7 +871,7 @@ static const struct { const char *name, *super; } k_classes[] = {
 };
 
 /*
- * Class.forName(String): how Unity finds a class when JNI's FindClass has no answer for it, from a thread whose class loader is the
+ * Class.forName(String), and (String, boolean, ClassLoader): how Unity finds a class when JNI's FindClass has no answer for it, from a thread whose class loader is the
  * system's. The name is dotted. The class is there if the framework or the APK has it (the same rule FindClass applies); a
  * ClassNotFoundException is what the engine expects for one that is not.
  */
@@ -884,6 +890,8 @@ static void Class_forName(tl_jcall *c)
 static const tl_jhle k_hle[] = {
     M("java/lang/Class", "forName", "(Ljava/lang/String;)Ljava/lang/Class;", Class_forName),
     M("java/lang/Class", "forName", "(Ljava/lang/String;)Ljava/lang/Object;", Class_forName),
+    /* Unity 6 asks with the app's class loader; the APK's classes are the only ones that loader adds. */
+    M("java/lang/Class", "forName", "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;", Class_forName),
     M("java/lang/System", "load", "(Ljava/lang/String;)V", System_load),
     M("java/lang/System", "loadLibrary", "(Ljava/lang/String;)V", System_loadLibrary),
     M("com/sybogames/chili/migration/KilooPlatformAndroidBridge", "<init>", "()V", Noop),
@@ -1044,6 +1052,7 @@ static const tl_jhle k_hle[] = {
     M("org/fmod/FMODAudioDevice", "<init>", "()V", Noop), M("org/fmod/FMODAudioDevice", "start", "()V", FMODEx_start),
     M("org/fmod/FMODAudioDevice", "stop", "()V", FMODEx_stop), M("org/fmod/FMODAudioDevice", "close", "()V", FMODEx_stop), M("org/fmod/FMODAudioDevice", "isRunning", "()Z", FMOD_isRunning),
     M("com/unity3d/player/UnityPlayer", "initializeGoogleAr", "()Z", UnityPlayer_initializeGoogleAr),
+    M("com/unity3d/player/UnityPlayer", "loadLibrary", "(Ljava/lang/String;)Z", UnityPlayer_loadLibrary),
     M("bitter/jnibridge/JNIBridge", "newInterfaceProxy", "(J[Ljava/lang/Class;)Ljava/lang/Object;", JNIBridge_newInterfaceProxy),
     M("com/unity3d/player/ReflectionHelper", "getConstructorID", "(Ljava/lang/Class;Ljava/lang/String;)Ljava/lang/reflect/Constructor;", Reflection_getConstructorID),
     M("com/unity3d/player/ReflectionHelper", "getMethodID", "(Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/reflect/Method;", Reflection_getMethodID),

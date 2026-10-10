@@ -36,16 +36,96 @@ static struct {
     struct timespec perf_since;
     pthread_t thread;
     bool thread_started;
+    bool loaded;
+    const char *player_cls;  /* the class the engine registered the player's natives on */
+    pthread_t ui;
+    bool ui_started;
 } U;
+
+/*
+ * The UI thread: Android's main thread, with its looper. libunity's JNI_OnLoad takes ALooper_forThread() as the UI
+ * thread's looper, and the engine later posts work to it (and on Unity 6 waits for that work), so the engine is
+ * loaded and initialised here and the thread then serves its looper, as Android's main thread does.
+ */
+static struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    void (*job)(void);
+    bool done;
+    void *looper;
+} UI = { .mu = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER };
+
+static void *ui_main(void *arg)
+{
+    (void)arg;
+    pthread_setname_np("UiThread");
+    void *looper = ((void *(*)(int))tl_bionic_find("ALooper_prepare"))(0);
+    int (*poll_once)(int, int *, int *, void **) = tl_bionic_find("ALooper_pollOnce");
+    pthread_mutex_lock(&UI.mu);
+    UI.looper = looper;
+    pthread_cond_broadcast(&UI.cv);
+    pthread_mutex_unlock(&UI.mu);
+    while (!atomic_load(&U.stop)) {
+        poll_once(20, NULL, NULL, NULL);
+        pthread_mutex_lock(&UI.mu);
+        void (*job)(void) = UI.job;
+        pthread_mutex_unlock(&UI.mu);
+        if (!job) continue;
+        job();
+        if (tl_jni_pending()) tl_jni_clear();
+        pthread_mutex_lock(&UI.mu);
+        UI.job = NULL; UI.done = true;
+        pthread_cond_broadcast(&UI.cv);
+        pthread_mutex_unlock(&UI.mu);
+    }
+    return NULL;
+}
+
+/* Run a job on the UI thread and wait for it. */
+static void ui_sync(void (*job)(void))
+{
+    if (!U.ui_started) {
+        pthread_attr_t a;
+        pthread_attr_init(&a);
+        pthread_attr_setstacksize(&a, 8u << 20);   /* the engine's initialisation runs here, deeper than a default thread's 512 KiB */
+        int err = pthread_create(&U.ui, &a, ui_main, NULL);
+        pthread_attr_destroy(&a);
+        if (err) { job(); return; }
+        U.ui_started = true;
+        pthread_mutex_lock(&UI.mu);
+        while (!UI.looper) pthread_cond_wait(&UI.cv, &UI.mu);
+        pthread_mutex_unlock(&UI.mu);
+    }
+    pthread_mutex_lock(&UI.mu);
+    UI.job = job; UI.done = false;
+    pthread_mutex_unlock(&UI.mu);
+    ((void (*)(void *))tl_bionic_find("ALooper_wake"))(UI.looper);
+    pthread_mutex_lock(&UI.mu);
+    while (!UI.done) pthread_cond_wait(&UI.cv, &UI.mu);
+    pthread_mutex_unlock(&UI.mu);
+}
+
+#define UNITY_PLAYER "com/unity3d/player/UnityPlayer"
+/* Unity 6 made UnityPlayer abstract: the player is a UnityPlayerForActivityOrService (or ...ForGameActivity), and
+ * the engine registers the lifecycle and render natives on that subclass, keeping only the shared ones on UnityPlayer. */
+#define UNITY_PLAYER_AOS "com/unity3d/player/UnityPlayerForActivityOrService"
 
 typedef int32_t (*onload_fn)(void *vm, void *reserved);
 
 static void *native_of(const char *cls, const char *name, const char *sig)
 {
     void *fn = tl_jni_native(cls, name, sig);
+    /* A native declared on UnityPlayer is looked up on the player's own class first, and the other way round:
+     * which of the two holds it depends on the Unity version. */
+    if (!fn && U.player_cls && strcmp(U.player_cls, UNITY_PLAYER)) {
+        if (!strcmp(cls, UNITY_PLAYER)) fn = tl_jni_native(U.player_cls, name, sig);
+        else if (!strcmp(cls, U.player_cls)) fn = tl_jni_native(UNITY_PLAYER, name, sig);
+    }
     if (!fn) tl_log_line("unity: native %s.%s%s was not registered", cls, name, sig);
     return fn;
 }
+
+static void load_engine(void);
 
 bool tl_unity_start(const tl_unity_config *cfg)
 {
@@ -63,24 +143,36 @@ bool tl_unity_start(const tl_unity_config *cfg)
     /* new UnityPlayer(activity): the Java side's own constructor calls loadNative(dir),
      * which is System.load(dir + "/libmain.so") followed by NativeLoader.load(dir). */
     U.activity = tl_hle_activity();
-    U.player = tl_jni_new_object(tl_jni_class("com/unity3d/player/UnityPlayer"));
+    U.player_cls = UNITY_PLAYER;
+    ui_sync(load_engine);
+    return U.loaded;
+}
 
+static void load_engine(void)
+{
+    U.loaded = false;
     tl_lib *main_lib = tl_ld_load("libmain.so");
-    if (!main_lib) return false;
+    if (!main_lib) return;
     tl_ld_init(main_lib);
     onload_fn onload = (onload_fn)tl_ld_sym(main_lib, "JNI_OnLoad");
-    if (!onload) { tl_log_line("unity: libmain.so has no JNI_OnLoad"); return false; }
+    if (!onload) { tl_log_line("unity: libmain.so has no JNI_OnLoad"); return; }
     int32_t ver = onload(tl_jni_vm(), NULL);
     tl_log_line("unity: libmain JNI_OnLoad -> %#x", ver);
-    if (tl_jni_pending()) { tl_log_line("unity: an exception is pending after libmain's JNI_OnLoad"); return false; }
+    if (tl_jni_pending()) { tl_log_line("unity: an exception is pending after libmain's JNI_OnLoad"); return; }
 
     typedef uint8_t (*load_fn)(void *env, void *cls, void *dir);
     load_fn load = (load_fn)native_of("com/unity3d/player/NativeLoader", "load", "(Ljava/lang/String;)Z");
-    if (!load) return false;
+    if (!load) return;
     jobj *dir = tl_jni_new_string("/data/app/lib/arm64");
     uint8_t ok = load(tl_jni_env(), tl_jni_class_object("com/unity3d/player/NativeLoader"), dir);
     tl_log_line("unity: NativeLoader.load -> %d", ok);
-    return ok != 0;
+    /* libunity's JNI_OnLoad has run by now, so where it put nativeRender says which player this engine drives. */
+    if (!tl_jni_native(UNITY_PLAYER, "nativeRender", "()Z") && tl_jni_native(UNITY_PLAYER_AOS, "nativeRender", "()Z")) {
+        U.player_cls = UNITY_PLAYER_AOS;
+        tl_log_line("unity: Unity 6 player (%s)", U.player_cls);
+    }
+    U.player = tl_jni_new_object(tl_jni_class(U.player_cls));
+    U.loaded = ok != 0;
 }
 
 /*
@@ -96,7 +188,7 @@ static void call_native_on(const char *cls, jobj *self, const char *name, const 
 }
 static void call_native(const char *name, const char *sig, uintptr_t a, uintptr_t b)
 {
-    call_native_on("com/unity3d/player/UnityPlayer", U.player, name, sig, a, b);
+    call_native_on(U.player_cls, U.player, name, sig, a, b);
 }
 #define NATIVE_VOID(name, sig, a, b) call_native(name, sig, (uintptr_t)(a), (uintptr_t)(b))
 
@@ -123,7 +215,7 @@ static void *unity_main(void *arg)
         tl_log_line("unity: told the engine the volume (7 of 15) and that sound is on");
     }
 
-    void *render = native_of("com/unity3d/player/UnityPlayer", "nativeRender", "()Z");
+    void *render = native_of(U.player_cls, "nativeRender", "()Z");
     bool was_paused = false;
     while (render && !atomic_load(&U.stop)) {
         if (atomic_load(&U.paused)) {
@@ -150,10 +242,18 @@ static void *unity_main(void *arg)
     return NULL;
 }
 
-bool tl_unity_run(void)
+static void init_player(void)
 {
     /* The UnityPlayer constructor's last native step before it starts the thread. */
-    NATIVE_VOID("initJni", "(Landroid/content/Context;)V", U.activity, 0);
+    if (tl_jni_native(UNITY_PLAYER, "initJni", "(Landroid/content/Context;)V")) {
+        NATIVE_VOID("initJni", "(Landroid/content/Context;)V", U.activity, 0);
+    } else {
+        /* Unity 6: initJni(Context, int contextType, String), from UnityPlayer.initialize. The type is 0 for an
+         * activity or service player (1 is GameActivity), and the string is the player's extra arguments, "" by default. */
+        typedef void (*init_fn)(void *env, void *self, void *ctx, uintptr_t type, void *args);
+        init_fn init = (init_fn)native_of(UNITY_PLAYER, "initJni", "(Landroid/content/Context;ILjava/lang/String;)V");
+        if (init) init(tl_jni_env(), U.player, U.activity, 0, tl_jni_new_string(""));
+    }
     tl_log_line("unity: initJni done");
     /* The rest of the UnityPlayer constructor: the helpers it builds, whose constructors each call a
      * native that gives the engine its reference to the helper's Java class. Without these the engine
@@ -167,6 +267,12 @@ bool tl_unity_run(void)
     call_native_on("com/unity3d/player/HFPStatus", hfp, "initHFPStatusJni", "()V", 0, 0);
     jobj *olock = tl_jni_new_object(tl_jni_class("com/unity3d/player/OrientationLockListener"));
     call_native_on("com/unity3d/player/OrientationLockListener", olock, "nativeUpdateOrientationLockState", "(I)V", 1, 0);
+}
+
+bool tl_unity_run(void)
+{
+    /* The UnityPlayer constructor runs on the UI thread. */
+    ui_sync(init_player);
     pthread_attr_t a;
     pthread_attr_init(&a);
     pthread_attr_setstacksize(&a, 16u << 20);
@@ -191,8 +297,8 @@ static int64_t uptime_ms(void) { struct timespec ts; clock_gettime(CLOCK_MONOTON
 void tl_unity_touch(int phase, int id, float x, float y)
 {
     typedef uint8_t (*inject_fn)(void *env, void *self, void *event, uintptr_t source);
-    inject_fn fn = (inject_fn)native_of("com/unity3d/player/UnityPlayer", "nativeInjectEvent", "(Landroid/view/InputEvent;I)Z");
-    if (!fn) fn = (inject_fn)native_of("com/unity3d/player/UnityPlayer", "nativeInjectEvent", "(Landroid/view/InputEvent;)Z");
+    inject_fn fn = (inject_fn)native_of(UNITY_PLAYER, "nativeInjectEvent", "(Landroid/view/InputEvent;I)Z");
+    if (!fn) fn = (inject_fn)native_of(UNITY_PLAYER, "nativeInjectEvent", "(Landroid/view/InputEvent;)Z");
     if (!fn) return;
     pthread_mutex_lock(&T.lock);
     int idx = -1;
@@ -240,8 +346,8 @@ static void inject(jobj *ev)
 {
     typedef uint8_t (*inject_fn)(void *env, void *self, void *event, uintptr_t source);
     /* The newer players take (InputEvent, int), older ones only the event; the extra argument is harmless to those. */
-    inject_fn fn = (inject_fn)native_of("com/unity3d/player/UnityPlayer", "nativeInjectEvent", "(Landroid/view/InputEvent;I)Z");
-    if (!fn) fn = (inject_fn)native_of("com/unity3d/player/UnityPlayer", "nativeInjectEvent", "(Landroid/view/InputEvent;)Z");
+    inject_fn fn = (inject_fn)native_of(UNITY_PLAYER, "nativeInjectEvent", "(Landroid/view/InputEvent;I)Z");
+    if (!fn) fn = (inject_fn)native_of(UNITY_PLAYER, "nativeInjectEvent", "(Landroid/view/InputEvent;)Z");
     if (fn) { fn(tl_jni_env(), U.player, ev, 0); if (tl_jni_pending()) tl_jni_clear(); }
     tl_jni_unref(ev);
 }
