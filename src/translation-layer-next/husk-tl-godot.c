@@ -15,6 +15,8 @@
 #include "husk-tl-egl.h"
 #include "husk-tl-jni.h"
 #include "husk-tl-ld.h"
+#include "husk-tl-vulkan.h"
+#include "husk-tl-codewrite.h"
 #include "husk-tl-internal.h"
 
 void tl_jni_hle_install(void);
@@ -38,6 +40,7 @@ static struct {
     struct timespec perf_since;
     pthread_t thread;
     bool thread_started;
+    bool vulkan;             /* the project draws with Vulkan, here MoltenVK, and the layer is Vulkan's */
 } U;
 
 static jvalue vl(void *p) { jvalue v; v.j = 0; v.l = p; return v; }
@@ -91,6 +94,12 @@ static jobj *command_line(void)
         }
         if (owned) free((void *)d);
     }
+    /* Godot 4 draws with the Compatibility renderer (OpenGL ES, ANGLE) unless MoltenVK was offered: a Forward+ or Mobile project
+     * falls back to it as on a phone without Vulkan, where it otherwise stops at "Unable to initialize Vulkan video driver". */
+    if (U.major >= 4 && !U.cfg.vulkan && n + 4 <= 32) {
+        list[n++] = strdup("--rendering-driver"); list[n++] = strdup("opengl3");
+        list[n++] = strdup("--rendering-method"); list[n++] = strdup("gl_compatibility");
+    }
     jobj *arr = tl_jni_new_obj_array(tl_jni_class("java/lang/String"), (uint32_t)n);
     for (int i = 0; i < n; i++) { arr->oarr.v[i] = tl_jni_new_string(list[i]); tl_log_line("godot: argument %s", list[i]); free(list[i]); }
     return arr;
@@ -112,17 +121,35 @@ bool tl_godot_start(const tl_godot_config *cfg)
     int n = tl_dexidx_open(cfg->apk_path);
     tl_log_line("godot: %d classes in the APK's DEX", n);
     if (!tl_ld_add_apk(cfg->apk_path)) return false;
+    /* A C# project (Godot .NET) runs on Mono, whose JIT writes the code it makes into memory it maps executable: that memory
+     * comes from the JIT region, and its stores go through the writable view (husk-tl-codewrite.c). */
+    if (tl_ld_has_lib("libmonosgen-2.0.so")) {
+        tl_codewrite_enable();
+        /* .NET's culture data is ICU, which Android has in /apex and Husk does not carry: invariant globalization needs none
+         * (Godot draws the game's text itself). */
+        setenv("DOTNET_SYSTEM_GLOBALIZATION_INVARIANT", "1", 1);
+        tl_log_line("godot: .NET project (Mono): code writes on, invariant globalization");
+    }
     if (cfg->angle_egl && !tl_egl_init(cfg->angle_egl, cfg->angle_gles, cfg->frame_dir, cfg->frame_every)) return false;
     tl_jni_init();
     tl_hle_configure(cfg->package_name, cfg->apk_path, cfg->data_dir, cfg->width, cfg->height);
     tl_jni_hle_install();
     tl_godot_hle_install(cfg->package_name, cfg->apk_path, cfg->data_dir, cfg->width, cfg->height);
+    /* MoltenVK loaded before the engine looks for Vulkan (its setup checks for it). */
+    if (cfg->vulkan) tl_vk_available();
 
     /* Godot.onCreate: System.loadLibrary("godot_android") (JNI_OnLoad keeps the VM). */
     jvalue a = vl(tl_jni_new_string("godot_android"));
     tl_jni_call(tl_jni_class_object("java/lang/System"), "loadLibrary", "(Ljava/lang/String;)V", &a);
     if (tl_jni_pending()) { tl_log_line("godot: loading libgodot_android.so failed"); return false; }
     U.major = read_major();
+    /* .NET for Android's crypto library caches its Java classes in JNI_OnLoad, which .NET's Java start-up runs with
+     * System.loadLibrary; without it every TLS call dereferences NULL. */
+    if (tl_ld_has_lib("libSystem.Security.Cryptography.Native.Android.so")) {
+        jvalue c = vl(tl_jni_new_string("System.Security.Cryptography.Native.Android"));
+        tl_jni_call(tl_jni_class_object("java/lang/System"), "loadLibrary", "(Ljava/lang/String;)V", &c);
+        if (tl_jni_pending()) { tl_log_line("godot: .NET crypto library did not load"); tl_jni_clear(); }
+    }
     tl_log_line("godot: Godot %d", U.major);
 
     /* GodotLib.initialize(activity, godot, assets, io, netUtils, directoryAccess, fileAccess, useApkExpansion) */
@@ -139,9 +166,15 @@ bool tl_godot_start(const tl_godot_config *cfg)
     static const char *sig_noact = "(Lorg/godotengine/godot/Godot;Landroid/content/res/AssetManager;Lorg/godotengine/godot/GodotIO;"
         "Lorg/godotengine/godot/utils/GodotNetUtils;Lorg/godotengine/godot/io/directory/DirectoryAccessHandler;"
         "Lorg/godotengine/godot/io/file/FileAccessHandler;Z)Z";
-    if (tl_dexidx_declares_method(LIB, "initialize", sig_noact, NULL)) {
+    /* 4.7: a GodotNativeBridge in the Godot object's place. */
+    static const char *sig_bridge = "(Lorg/godotengine/godot/nativeapi/GodotNativeBridge;Landroid/content/res/AssetManager;Lorg/godotengine/godot/GodotIO;"
+        "Lorg/godotengine/godot/utils/GodotNetUtils;Lorg/godotengine/godot/io/directory/DirectoryAccessHandler;"
+        "Lorg/godotengine/godot/io/file/FileAccessHandler;Z)Z";
+    bool bridge = tl_dexidx_declares_method(LIB, "initialize", sig_bridge, NULL);
+    if (bridge) godot = tl_jni_new_object(tl_jni_class("org/godotengine/godot/nativeapi/GodotNativeBridge"));
+    if (bridge || tl_dexidx_declares_method(LIB, "initialize", sig_noact, NULL)) {
         typedef uint8_t (*init7_fn)(void *env, void *cls, void *godot, void *assets, void *io, void *net, void *dirs, void *files, uint8_t exp);
-        init7_fn init = (init7_fn)native_of("initialize", sig_noact);
+        init7_fn init = (init7_fn)native_of("initialize", bridge ? sig_bridge : sig_noact);
         if (!init) return false;
         if (!init(tl_jni_env(), tl_jni_class_object(LIB), godot, tl_hle_assets(), io, net, dirs, files, 0)) { tl_log_line("godot: initialize refused"); return false; }
     } else {
@@ -172,13 +205,29 @@ bool tl_godot_start(const tl_godot_config *cfg)
     }
     if (tl_jni_pending()) { tl_log_line("godot: setup left an exception"); tl_jni_clear(); }
     tl_log_line("godot: setup -> %d", ok);
+    /* Which renderer the project asks for, from its settings: the Compatibility renderer draws with OpenGL ES (ANGLE); Forward+
+     * and Mobile with Vulkan, here MoltenVK, and EGL then keeps off the layer. Asked of the settings, not of getRendererInfo,
+     * which checks for Vulkan before there is a window and remembers the answer. */
+    typedef void *(*global_fn)(void *env, void *cls, void *key);
+    global_fn global = U.major >= 4 ? (global_fn)native_of("getGlobal", "(Ljava/lang/String;)Ljava/lang/String;") : NULL;
+    char method[64] = "";
+    static const char *const keys[] = { "rendering/renderer/rendering_method.mobile", "rendering/renderer/rendering_method" };
+    for (int i = 0; global && i < 2 && !method[0]; i++) {
+        jobj *v = global(tl_jni_env(), tl_jni_class_object(LIB), tl_jni_new_string(keys[i]));
+        if (tl_jni_pending()) tl_jni_clear();
+        const char *t = v ? tl_jni_string(v) : NULL;
+        if (t) snprintf(method, sizeof(method), "%s", t);
+    }
+    U.vulkan = U.major >= 4 && strcmp(method, "gl_compatibility") != 0 && cfg->vulkan && tl_vk_available();
+    if (U.vulkan) tl_egl_offscreen_windows(true);
+    tl_log_line("godot: rendering method \"%s\" -> %s", method, U.vulkan ? "Vulkan (MoltenVK)" : "OpenGL ES (ANGLE)");
     return ok != 0;
 }
 
 /* ------------------------------------------------------------------ input */
 
 typedef struct { int kind, phase, id, key; bool down; float x, y; } event;
-enum { EV_TOUCH, EV_KEY };
+enum { EV_TOUCH, EV_KEY, EV_CHAR };
 static pthread_mutex_t q_lock = PTHREAD_MUTEX_INITIALIZER;
 static event q[256];
 static int q_n;
@@ -193,6 +242,16 @@ static void enqueue(event e)
 
 void tl_godot_touch(int phase, int id, float x, float y) { enqueue((event){ .kind = EV_TOUCH, .phase = phase, .id = id, .x = x, .y = y }); }
 void tl_godot_key(int keycode, bool down) { enqueue((event){ .kind = EV_KEY, .key = keycode, .down = down }); }
+void tl_godot_text(const char *s)
+{
+    for (const uint8_t *p = (const uint8_t *)s; p && *p;) {
+        uint32_t cp = *p++; int more = cp >= 0xF0 ? 3 : cp >= 0xE0 ? 2 : cp >= 0xC0 ? 1 : 0;
+        if (more) cp &= 0x3F >> more;
+        for (; more && (*p & 0xC0) == 0x80; more--) cp = (cp << 6) | (*p++ & 0x3F);
+        enqueue((event){ .kind = EV_CHAR, .key = (int)cp, .down = true });
+        enqueue((event){ .kind = EV_CHAR, .key = (int)cp, .down = false });
+    }
+}
 
 /*
  * GodotLib.dispatchTouchEvent(event, actionPointerId, pointerCount, positions, doubleTap): an Android MotionEvent's
@@ -239,6 +298,19 @@ static void send_touch(const event *e)
 /* GodotLib.key(keycode, scancode, unicode, pressed) in Godot 3; Godot 4 has key(physical, unicode, keyLabel, pressed, echo). */
 static void send_key(const event *e)
 {
+    if (e->kind == EV_CHAR) {
+        /* GodotEditText: key(0, codepoint, 0, pressed, false) in Godot 4, key(0, 0, codepoint, pressed) in Godot 3 */
+        if (U.major >= 4) {
+            typedef void (*key4_fn)(void *env, void *cls, int phys, int uni, int label, uint8_t pressed, uint8_t echo);
+            key4_fn fn = (key4_fn)native_of("key", "(IIIZZ)V");
+            if (fn) fn(tl_jni_env(), tl_jni_class_object(LIB), 0, e->key, 0, e->down, 0);
+        } else {
+            typedef void (*key3_fn)(void *env, void *cls, int code, int scan, int uni, uint8_t pressed);
+            key3_fn fn = (key3_fn)native_of("key", "(IIIZ)V");
+            if (fn) fn(tl_jni_env(), tl_jni_class_object(LIB), 0, 0, e->key, e->down);
+        }
+        return;
+    }
     if (U.major >= 4) {
         typedef void (*key4_fn)(void *env, void *cls, int phys, int uni, int label, uint8_t pressed, uint8_t echo);
         static key4_fn fn;
@@ -259,7 +331,7 @@ static void drain_events(void)
     n = q_n; memcpy(local, q, sizeof(event) * (size_t)n); q_n = 0;
     pthread_mutex_unlock(&q_lock);
     for (int i = 0; i < n; i++) {
-        if (local[i].kind == EV_TOUCH) send_touch(&local[i]); else send_key(&local[i]);
+        if (local[i].kind == EV_TOUCH) send_touch(&local[i]); else send_key(&local[i]);   /* EV_KEY and EV_CHAR */
         if (tl_jni_pending()) tl_jni_clear();
     }
 }

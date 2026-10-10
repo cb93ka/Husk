@@ -1101,6 +1101,7 @@ jobj *tl_hle_config(void) { return H.config; }
 extern void tl_loop_install(void);
 extern void tl_input_install(void);
 extern void tl_tls_install(void);
+void tl_crypto_install(void);
 extern void tl_gms_install(void);
 void tl_jni_hle_install(void)
 {
@@ -1110,6 +1111,7 @@ void tl_jni_hle_install(void)
     tl_loop_install();
     tl_input_install();
     tl_tls_install();
+    tl_crypto_install();
     tl_http_install();
     tl_gms_install();
 

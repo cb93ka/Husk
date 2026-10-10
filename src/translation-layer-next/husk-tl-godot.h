@@ -28,6 +28,7 @@ typedef struct tl_godot_config {
     const char *angle_gles;      /* ANGLE's libGLESv2, or NULL */
     const char *frame_dir;       /* host tests: write frames here instead of presenting */
     int frame_every;
+    bool vulkan;                 /* MoltenVK is configured (tl_vk_configure): a project on the Vulkan renderer draws with it */
 } tl_godot_config;
 
 bool tl_godot_start(const tl_godot_config *cfg);
@@ -42,6 +43,10 @@ void tl_godot_quit(void);
 void tl_godot_touch(int phase, int id, float x, float y);
 /* An Android key code, pressed and released (4 is Back). */
 void tl_godot_key(int keycode, bool down);
+/* Typed text (UTF-8), sent as Godot's own text field sends it: a key event per character, carrying its code point. */
+void tl_godot_text(const char *utf8);
+/* Called with 1 when the game wants the on-screen keyboard (a LineEdit was focused) and 2 when it is done with it. */
+void tl_godot_set_keyboard_handler(void (*handler)(int action));
 
 typedef struct tl_godot_perf { double fps, mean_ms, max_ms; } tl_godot_perf;
 void tl_godot_perf_snapshot(tl_godot_perf *out);

@@ -12,6 +12,7 @@
 #include "husk-tl-internal.h"
 #include "husk-tl-codewrite.h"
 #include "husk-tl-xmem.h"
+#include "husk-tl-ld.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -36,6 +37,8 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/uio.h>
+#include <sys/ucontext.h>
+#include <stddef.h>
 #include <mach/mach.h>
 #include <time.h>
 #include <search.h>
@@ -92,8 +95,47 @@ static int synth_file(const char *content)
     return fd;
 }
 
+/* /proc/self/maps: the guest's own libraries, a line for each loaded segment, as Linux lists them. Mono will not start without
+ * the file (it checks that /proc is mounted by looking for it), and runtimes read it to find a library's mapping. */
+typedef struct { char *buf; size_t n, len; } maps_out;
+static int maps_lib(uintptr_t bias, const char *name, const void *phdr, unsigned phnum, void *user)
+{
+    maps_out *m = user;
+    const uint8_t *ph = phdr;
+    for (unsigned i = 0; i < phnum && m->len + 160 < m->n; i++, ph += 56) {
+        uint32_t type, flags; uint64_t off, vaddr, memsz;
+        memcpy(&type, ph, 4); memcpy(&flags, ph + 4, 4); memcpy(&off, ph + 8, 8); memcpy(&vaddr, ph + 16, 8); memcpy(&memsz, ph + 40, 8);
+        if (type != 1 /* PT_LOAD */ || !memsz) continue;
+        uint64_t start = (bias + vaddr) & ~0xfffull, end = (bias + vaddr + memsz + 0xfff) & ~0xfffull;
+        m->len += (size_t)snprintf(m->buf + m->len, m->n - m->len, "%012llx-%012llx %c%c%cp %08llx 00:00 0          %s%s\n",
+                                   (unsigned long long)start, (unsigned long long)end, (flags & 4) ? 'r' : '-', (flags & 2) ? 'w' : '-',
+                                   (flags & 1) ? 'x' : '-', (unsigned long long)(off & ~0xfffull), strchr(name, '/') ? "" : "/data/app/lib/arm64/", name);
+    }
+    return 0;
+}
+
+static bool is_proc_maps(const char *p)
+{
+    if (!strcmp(p, "/proc/self/maps")) return true;
+    char own[48]; snprintf(own, sizeof(own), "/proc/%d/maps", getpid());
+    return !strcmp(p, own);
+}
+
+/* The paths synth_content makes up, without making them. */
+static bool synth_known(const char *p)
+{
+    return p && (!strcmp(p, "/proc/cpuinfo") || !strcmp(p, "/proc/meminfo") || !strcmp(p, "/proc/self/status") || is_proc_maps(p)
+                 || (!strncmp(p, "/sys/devices/system/cpu/", 24) && (strstr(p, "/present") || strstr(p, "/possible") || strstr(p, "/online"))));
+}
+
 static const char *synth_content(const char *path, char *buf, size_t n)
 {
+    if (is_proc_maps(path)) {
+        maps_out m = { buf, n, 0 };
+        buf[0] = 0;
+        tl_ld_iterate(maps_lib, &m);
+        return buf;
+    }
     if (!strcmp(path, "/proc/cpuinfo")) {
         buf[0] = 0;
         long ncpu = getenv("TL_NCPU") ? atol(getenv("TL_NCPU")) : sysconf(_SC_NPROCESSORS_ONLN);
@@ -122,7 +164,7 @@ static const char *synth_content(const char *path, char *buf, size_t n)
 /* A file for a path whose contents are made up (/proc/cpuinfo ...), or -1 when the path is real. */
 int tl_synth_open(const char *path)
 {
-    char content[8192];
+    char content[32768];
     const char *s = synth_content(path, content, sizeof(content));
     return s ? synth_file(s) : -1;
 }
@@ -397,7 +439,7 @@ void tl_atomic_closed(int fd)
 
 static int b_open(const char *path, int flags, unsigned mode)
 {
-    char buf[1024], content[8192];
+    char buf[1024], content[32768];
     jar_entry jar;
     if (jar_lookup(path, &jar)) {
         if (!jar.found || jar.dir || (flags & 3) != 0) { tl_set_guest_errno(jar.dir ? 21 : 2); ftrace_open_jar(path, -1); return -1; }
@@ -544,7 +586,7 @@ static void ftrace(const char *what, const char *path, int r, int e)
     if (tr < 0) tr = getenv("TL_FILE_TRACE") ? atoi(getenv("TL_FILE_TRACE")) : 0;
     if (tr) tl_log_line("file: %s(%s) -> %d%s", what, path ? path : "(null)", r, r < 0 ? (e == ENOENT ? " ENOENT" : " error") : "");
 }
-static int b_access(const char *p, int m) { char b[1024]; jar_entry jar; if (jar_lookup(p, &jar)) { if (!jar.found) { tl_set_guest_errno(2); return -1; } if (m & 2) { tl_set_guest_errno(13); return -1; } return 0; } if (vfile_find(p)) { if (m & 2) { tl_set_guest_errno(13); return -1; } return 0; } TL_ERRNO_BEGIN(); int r = access(tl_path_resolve(p, b, sizeof(b)), m); int e = errno; TL_ERRNO_END(); ftrace("access", p, r, e); return r; }
+static int b_access(const char *p, int m) { if (synth_known(p)) { if (m & 2) { tl_set_guest_errno(13); return -1; } return 0; } char b[1024]; jar_entry jar; if (jar_lookup(p, &jar)) { if (!jar.found) { tl_set_guest_errno(2); return -1; } if (m & 2) { tl_set_guest_errno(13); return -1; } return 0; } if (vfile_find(p)) { if (m & 2) { tl_set_guest_errno(13); return -1; } return 0; } TL_ERRNO_BEGIN(); int r = access(tl_path_resolve(p, b, sizeof(b)), m); int e = errno; TL_ERRNO_END(); ftrace("access", p, r, e); return r; }
 static int b_chmod(const char *p, unsigned m) { char b[1024]; TL_ERRNO_BEGIN(); int r = chmod(tl_path_resolve(p, b, sizeof(b)), (mode_t)m); TL_ERRNO_END(); return r; }
 static int b_fchmod(int fd, unsigned m) { TL_ERRNO_BEGIN(); int r = fchmod(fd, (mode_t)m); TL_ERRNO_END(); return r; }
 static int b_link(const char *a, const char *b2) { char x[1024], y[1024]; TL_ERRNO_BEGIN(); int r = link(tl_path_resolve(a, x, sizeof(x)), tl_path_resolve(b2, y, sizeof(y))); TL_ERRNO_END(); return r; }
@@ -1014,13 +1056,48 @@ static void sig_trace(const char *what, int g)
     tl_log_line("signal[%s]: %s %d", nm, what, g);
 }
 
+/*
+ * Linux arm64's ucontext_t, which a guest handler reads: Darwin's differs, and a handler that looks at the interrupted registers
+ * (Mono suspending a thread for its GC) read garbage from it and retried forever. Built from Darwin's for the handler, and what
+ * the handler changed copied back.
+ */
+typedef struct {
+    uint64_t fault_address, regs[31], sp, pc, pstate;
+    uint8_t reserved[4096] __attribute__((aligned(16)));           /* fpsimd_context, then a zero header */
+} linux_sigcontext;
+typedef struct {
+    uint64_t uc_flags; void *uc_link;
+    struct { void *ss_sp; int ss_flags; int pad; uint64_t ss_size; } uc_stack;
+    uint64_t uc_sigmask; uint8_t mask_pad[120];
+    linux_sigcontext uc_mcontext __attribute__((aligned(16)));
+} linux_ucontext;
+typedef struct { uint32_t magic, size, fpsr, fpcr; __uint128_t vregs[32]; } linux_fpsimd;
+_Static_assert(__builtin_offsetof(linux_ucontext, uc_mcontext) == 176, "uc_mcontext");
+_Static_assert(__builtin_offsetof(linux_sigcontext, reserved) == 0x120, "__reserved");
+
 static void host_signal_entry(int dsig, siginfo_t *info, void *uctx)
 {
     int gsig = tl_signal_from_darwin(dsig);
     sig_trace("delivered", gsig);
     void *h = g_guest_sig[gsig < 32 ? gsig : 0].handler;
     if (!h || h == (void *)1) return;
-    ((guest_handler)h)(gsig, info, uctx);
+    ucontext_t *du = uctx;
+    if (!du || !du->uc_mcontext) { ((guest_handler)h)(gsig, info, uctx); return; }
+    struct __darwin_mcontext64 *mc = du->uc_mcontext;
+    linux_ucontext lu;
+    memset(&lu, 0, offsetof(linux_ucontext, uc_mcontext) + offsetof(linux_sigcontext, reserved) + sizeof(linux_fpsimd) + 8);
+    for (int i = 0; i < 29; i++) lu.uc_mcontext.regs[i] = mc->__ss.__x[i];
+    lu.uc_mcontext.regs[29] = mc->__ss.__fp; lu.uc_mcontext.regs[30] = mc->__ss.__lr;
+    lu.uc_mcontext.sp = mc->__ss.__sp; lu.uc_mcontext.pc = mc->__ss.__pc; lu.uc_mcontext.pstate = mc->__ss.__cpsr;
+    lu.uc_mcontext.fault_address = mc->__es.__far;
+    linux_fpsimd *fp = (linux_fpsimd *)lu.uc_mcontext.reserved;
+    fp->magic = 0x46508001; fp->size = sizeof(*fp); fp->fpsr = mc->__ns.__fpsr; fp->fpcr = mc->__ns.__fpcr;
+    memcpy(fp->vregs, mc->__ns.__v, sizeof(fp->vregs));
+    ((guest_handler)h)(gsig, info, &lu);
+    for (int i = 0; i < 29; i++) mc->__ss.__x[i] = lu.uc_mcontext.regs[i];
+    mc->__ss.__fp = lu.uc_mcontext.regs[29]; mc->__ss.__lr = lu.uc_mcontext.regs[30];
+    mc->__ss.__sp = lu.uc_mcontext.sp; mc->__ss.__pc = lu.uc_mcontext.pc; mc->__ss.__cpsr = (uint32_t)lu.uc_mcontext.pstate;
+    memcpy(mc->__ns.__v, fp->vregs, sizeof(fp->vregs));
 }
 
 static int is_fault_signal(int g) { return g == 4 || g == 5 || g == 6 || g == 7 || g == 8 || g == 11; }

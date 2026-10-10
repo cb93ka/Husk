@@ -105,6 +105,9 @@ final class TLUnityUIView: UIView, UIKeyInput {
         } else if engine == .sdl {
             TLUnityUIView.cocosView = self
             TLUnityUIView.installSDLKeyboardHandler()
+        } else if engine == .godot {
+            TLUnityUIView.cocosView = self
+            TLUnityUIView.installGodotKeyboardHandler()
         } else if engine == .minecraft {
             TLUnityUIView.cocosView = self
             TLUnityUIView.installGameActivityKeyboardHandler()
@@ -336,7 +339,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
 
     /// A game asks for the keyboard when its text field is tapped. The keyboard belongs to this view; what it types goes
     /// to the game, and a strip above the keyboard shows the text, because in landscape the keyboard covers the game's field.
-    override var canBecomeFirstResponder: Bool { engine == .cocos || engine == .sdl || engine == .minecraft || engine == .flutter || engine == .java }
+    override var canBecomeFirstResponder: Bool { engine == .cocos || engine == .sdl || engine == .minecraft || engine == .flutter || engine == .java || engine == .godot }
     var hasText: Bool { true }
     var autocorrectionType: UITextAutocorrectionType = .no
     var autocapitalizationType: UITextAutocapitalizationType = .none
@@ -373,7 +376,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
         bar.addSubview(done)
         return bar
     }()
-    override var inputAccessoryView: UIView? { engine == .cocos || engine == .sdl || engine == .minecraft ? keyboardBar : nil }
+    override var inputAccessoryView: UIView? { engine == .cocos || engine == .sdl || engine == .minecraft || engine == .godot ? keyboardBar : nil }
 
     func insertText(_ text: String) {
         if engine == .java {
@@ -389,7 +392,8 @@ final class TLUnityUIView: UIView, UIKeyInput {
         if text == "\n" { finishTyping(); return }
         typed += text
         typedLabel.text = typed
-        if engine == .sdl { husk_sdl_commit_text(text) } else if engine == .minecraft { husk_ga_insert_text(text) } else { husk_cocos_insert_text(text) }
+        if engine == .sdl { husk_sdl_commit_text(text) } else if engine == .minecraft { husk_ga_insert_text(text) }
+        else if engine == .godot { husk_godot_insert_text(text) } else { husk_cocos_insert_text(text) }
     }
 
     func deleteBackward() {
@@ -398,6 +402,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
         if !typed.isEmpty { typed.removeLast() }
         typedLabel.text = typed
         if engine == .sdl { husk_sdl_key(67, 1); husk_sdl_key(67, 0) }   // KEYCODE_DEL
+        else if engine == .godot { husk_godot_key(67, 1); husk_godot_key(67, 0) }
         else if engine == .minecraft { husk_ga_delete_backward() }
         else { husk_cocos_delete_backward() }
     }
@@ -407,6 +412,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
     /// Return, or the Done button: what Android's "done" action does -- the game gets a newline, and the keyboard goes.
     private func finishTyping() {
         if engine == .sdl { husk_sdl_key(66, 1); husk_sdl_key(66, 0) }   // KEYCODE_ENTER
+        else if engine == .godot { husk_godot_key(66, 1); husk_godot_key(66, 0) }
         else if engine == .minecraft { husk_ga_editor_action() }        // the field's own action: send the chat, name the world
         else { husk_cocos_insert_text("\n") }
         resignFirstResponder()
@@ -531,6 +537,16 @@ final class TLUnityUIView: UIView, UIKeyInput {
                 } else {
                     view.resignFirstResponder()
                 }
+            }
+        }
+    }
+
+    /// A Godot game's requests (GodotIO.showKeyboard / hideKeyboard, when a LineEdit gains or loses focus): 1 shows the keyboard, 2 hides it.
+    static func installGodotKeyboardHandler() {
+        husk_godot_set_keyboard_handler { action in
+            DispatchQueue.main.async {
+                guard let view = TLUnityUIView.cocosView, view.engine == .godot else { return }
+                if action == 1 { view.setTyped(""); view.becomeFirstResponder() } else { view.resignFirstResponder() }
             }
         }
     }

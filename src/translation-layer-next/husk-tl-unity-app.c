@@ -364,6 +364,7 @@ static void *launch_thread(void *arg)
             .apk_path = A.apk, .data_dir = A.data, .package_name = A.package, .width = A.width, .height = A.height,
             .metal_layer = A.layer, .angle_egl = A.angle, .angle_gles = NULL, .frame_dir = NULL, .frame_every = 0,
         };
+        /* Not offered Vulkan: Godot 4 projects run on the Compatibility renderer (on MoltenVK a .NET project's GPU work timed out). */
         tl_log_line("godot: starting %s as %s, %dx%d", A.apk, A.package, A.width, A.height);
         tl_audio_install();
         ok = tl_godot_start(&cfg) && tl_godot_run();
@@ -556,6 +557,9 @@ void husk_native_set_system_files(const char *cacerts_dir, const char *fonts_roo
 /* Where MoltenVK is: Unreal's Vulkan renderer runs on it. Before the launch call. */
 void husk_ue4_set_vulkan(const char *dylib) { snprintf(A.vulkan, sizeof(A.vulkan), "%s", dylib ? dylib : ""); }
 void husk_unity_set_renderer(int renderer) { g_unity_renderer = renderer; }
+void husk_godot_set_keyboard_handler(void (*handler)(int action)) { tl_godot_set_keyboard_handler(handler); }
+void husk_godot_insert_text(const char *utf8) { if (atomic_load(&A.state) == HUSK_UNITY_RUNNING && A.engine == ENGINE_GODOT) tl_godot_text(utf8); }
+void husk_godot_key(int keycode, int down) { if (atomic_load(&A.state) == HUSK_UNITY_RUNNING && A.engine == ENGINE_GODOT) tl_godot_key(keycode, down != 0); }
 void tl_set_shared_storage(const char *dir);
 void husk_native_set_shared_storage(const char *dir) { tl_set_shared_storage(dir); }
 

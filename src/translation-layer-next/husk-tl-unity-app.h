@@ -58,6 +58,10 @@ bool husk_gta_launch(const char *apk, const char *data_dir, void *metal_layer, i
 void husk_ue4_set_vulkan(const char *dylib);
 /* How a Unity 6 game draws: 0 the default (Vulkan when husk_ue4_set_vulkan named MoltenVK), 1 OpenGL ES, 2 Vulkan. Call before husk_unity_launch. */
 void husk_unity_set_renderer(int renderer);
+/* A Godot game's text input: the keyboard requests (1 show, 2 hide), typed text, and Android key codes (67 Delete, 66 Enter). */
+void husk_godot_set_keyboard_handler(void (*handler)(int action));
+void husk_godot_insert_text(const char *utf8);
+void husk_godot_key(int keycode, int down);
 
 /* Flutter apps (libflutter.so): the engine and the app's Dart run natively; Impeller draws through ANGLE. */
 bool husk_flutter_launch(const char *apk, const char *data_dir, void *metal_layer, int width, int height,

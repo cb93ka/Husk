@@ -44,6 +44,10 @@ static jvalue vz(int z) { jvalue v; v.j = 0; v.z = z != 0; return v; }
 static jvalue vf(float f) { jvalue v; v.j = 0; v.f = f; return v; }
 static jvalue vd(double d) { jvalue v; v.d = d; return v; }
 static void Noop(tl_jcall *c) { (void)c; }
+static void (*g_keyboard)(int action);
+void tl_godot_set_keyboard_handler(void (*handler)(int action)) { g_keyboard = handler; }
+static void IO_showKeyboard(tl_jcall *c) { (void)c; if (g_keyboard) g_keyboard(1); }
+static void IO_hideKeyboard(tl_jcall *c) { (void)c; if (g_keyboard) g_keyboard(2); }
 static void RetFalse(tl_jcall *c) { c->ret = vz(0); }
 static void RetTrue(tl_jcall *c) { c->ret = vz(1); }
 static void RetZero(tl_jcall *c) { c->ret = vi(0); }
@@ -354,8 +358,8 @@ static const tl_jhle k_godot[] = {
     M(IO, "getSystemDir", "(IZ)Ljava/lang/String;", IO_systemDir), M(IO, "openURI", "(Ljava/lang/String;)I", IO_openURI),
     M(IO, "getWindowSafeArea", "()[I", IO_safeArea), M(IO, "getDisplaySafeArea", "()[I", IO_safeArea),
     M(IO, "getDisplayCutouts", "()[I", IO_cutouts),
-    M(IO, "showKeyboard", "(Ljava/lang/String;IIII)V", Noop), M(IO, "showKeyboard", "(Ljava/lang/String;ZIII)V", Noop),
-    M(IO, "hideKeyboard", "()V", Noop), M(IO, "hasHardwareKeyboard", "()Z", RetFalse),
+    M(IO, "showKeyboard", "(Ljava/lang/String;IIII)V", IO_showKeyboard), M(IO, "showKeyboard", "(Ljava/lang/String;ZIII)V", IO_showKeyboard),
+    M(IO, "hideKeyboard", "()V", IO_hideKeyboard), M(IO, "hasHardwareKeyboard", "()Z", RetFalse),
 
     M(FA, "fileOpen", "(Ljava/lang/String;I)I", FA_open), M(FA, "fileClose", "(I)V", FA_close),
     M(FA, "fileGetSize", "(I)J", FA_size), M(FA, "fileGetPosition", "(I)J", FA_pos),
@@ -426,5 +430,8 @@ void tl_godot_hle_install(const char *pkg, const char *apk, const char *data, in
     G.w = w; G.h = h;
     mkdirs(G.files); mkdirs(G.cache);
     for (size_t i = 0; i < sizeof(k_classes) / sizeof(k_classes[0]); i++) tl_jni_declare(k_classes[i], "java/lang/Object");
+    /* Godot 4.7 hands the engine a GodotNativeBridge where it used to hand the Godot object, with the same methods: made a kind
+     * of Godot here, it answers with everything above. */
+    tl_jni_declare("org/godotengine/godot/nativeapi/GodotNativeBridge", GD);
     tl_jni_register_hle(k_godot);
 }

@@ -622,6 +622,18 @@ static void *bionic_dlopen(const char *path, int flags)
     return L;
 }
 
+/*
+ * .NET for Android does TLS through Java's SSLEngine, which Husk does not have: SSLStreamCreate then gives a NULL stream, and
+ * SSLStreamInitialize asserts on it and aborts the process. Answered "failed" instead, the managed side throws an SslException
+ * and the game sees the request fail, as it would offline.
+ */
+static int32_t (*g_ssl_init_real)(void *, uint8_t, void *, void *, void *, int32_t, const char *);
+static int32_t ssl_init_guard(void *stream, uint8_t server, void *ctx, void *reader, void *writer, int32_t size, const char *host)
+{
+    if (!stream) { tl_note_once("TLS through Java's SSLEngine is not available: .NET HTTPS requests fail"); return 0; }
+    return g_ssl_init_real ? g_ssl_init_real(stream, server, ctx, reader, writer, size, host) : 0;
+}
+
 static void *bionic_dlsym(void *handle, const char *name)
 {
     if (!name) return NULL;
@@ -638,6 +650,7 @@ static void *bionic_dlsym(void *handle, const char *name)
     } else {
         r = tl_ld_sym((tl_lib *)handle, name);
     }
+    if (r && !strcmp(name, "AndroidCryptoNative_SSLStreamInitialize")) { g_ssl_init_real = r; r = (void *)ssl_init_guard; }
     if (getenv("TL_DL_TRACE")) tl_log_line("dl: dlsym(%s) -> %s", name, r ? "found" : "missing");
     if (!r) dl_fail("undefined symbol: %s", name);
     return r;
