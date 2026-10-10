@@ -1,0 +1,99 @@
+# Build Husk.ipa on a GitHub macOS runner without rebuilding the heavy native dependencies.
+#
+# QEMU, ANGLE and MoltenVK take hours to cross-compile (scripts/ci_build.sh). Their sources have not
+# changed since release 1.1.0, so this workflow takes the built libraries, the guest kernel and the
+# firmware from that release's IPA, builds only the on-device pairing library (Rust) and the app itself,
+# and publishes the IPA as a release of this repository. The Java runtime and the Android system fonts
+# (build/java-runtime, build/android-system) are not part of it: Java-only apps and Flutter fonts need a
+# full local build.
+name: Build IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "fix/**" ]
+
+permissions:
+  contents: write
+
+env:
+  BASE_RELEASE: "1.1.0"
+  BASE_REPO: Leviidev/Husk
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+
+jobs:
+  ipa:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode
+        run: |
+          XC="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)"
+          [ -n "$XC" ] && sudo xcode-select -s "$XC"
+          xcodebuild -version
+
+      - name: Tools
+        run: brew install xcodegen
+
+      - name: Prebuilt libraries and guest files from the base release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BASE="$RUNNER_TEMP/base"
+          mkdir -p "$BASE"
+          gh release download "$BASE_RELEASE" -R "$BASE_REPO" -p Husk.ipa -D "$BASE"
+          unzip -q "$BASE/Husk.ipa" -d "$BASE"
+          APP="$BASE/Payload/Husk.app"
+
+          mkdir -p build/ios-arm64/lib build/ios-arm64/sysroot/lib guests/phase0 third_party/build/qemu-10.0.12-utm/pc-bios
+          cp "$APP/Frameworks/libqemu-aarch64-softmmu.dylib" build/ios-arm64/lib/
+          cp "$APP/Frameworks/libANGLE-shared.dylib" build/ios-arm64/sysroot/lib/
+          xcodebuild -create-xcframework -framework "$APP/Frameworks/MoltenVK.framework" -output build/ios-arm64/lib/MoltenVK.xcframework
+          cp "$APP/vmlinuz-virt" "$APP/initramfs-virt" guests/phase0/
+          cp "$APP"/pc-bios/*.rom third_party/build/qemu-10.0.12-utm/pc-bios/
+          bzip2 -c "$APP/edk2-aarch64-code.fd" > third_party/build/qemu-10.0.12-utm/pc-bios/edk2-aarch64-code.fd.bz2
+
+          # The project's pre-build step makes two blank qcow2 seeds with qemu-img. Rather than install QEMU for that,
+          # hand it the release's own seeds, which are exactly those blank images.
+          mkdir -p "$RUNNER_TEMP/bin"
+          cp "$APP/lineage-efi-vars-seed.fd" "$APP/lineage-vdb-seed.qcow2" "$RUNNER_TEMP/bin/"
+          cat > "$RUNNER_TEMP/bin/qemu-img" <<EOF
+          #!/bin/bash
+          # qemu-img create -f qcow2 <file> <size>
+          case "\$5" in
+            64M) cp "$RUNNER_TEMP/bin/lineage-efi-vars-seed.fd" "\$4" ;;
+            16G) cp "$RUNNER_TEMP/bin/lineage-vdb-seed.qcow2" "\$4" ;;
+            *) echo "qemu-img stand-in: unexpected size \$5" >&2; exit 1 ;;
+          esac
+          EOF
+          chmod +x "$RUNNER_TEMP/bin/qemu-img"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: On-device pairing library (Rust)
+        run: |
+          rustup target add aarch64-apple-ios
+          ./scripts/build_rppairing_ios.sh
+
+      - name: Build and package
+        run: |
+          DD="$RUNNER_TEMP/dd" ./scripts/package_ipa.sh "$RUNNER_TEMP/Husk.ipa" || { grep -E "error:" "$RUNNER_TEMP/dd/build.log" | head -40; exit 1; }
+
+      - name: Build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ runner.temp }}/dd/build.log
+          if-no-files-found: ignore
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-$(git rev-parse --short HEAD)-${{ github.run_number }}"
+          gh release create "$TAG" "$RUNNER_TEMP/Husk.ipa" -R "${{ github.repository }}" --target "${{ github.sha }}" \
+            --title "Husk ($(git rev-parse --short HEAD), ${GITHUB_REF_NAME})" \
+            --notes "Built by the Build IPA workflow from ${GITHUB_REF_NAME} at ${{ github.sha }}. Install with SideStore or AltStore over an existing Husk (bundle id com.husk.app)."
