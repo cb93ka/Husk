@@ -71,6 +71,8 @@ static struct {
     void *layer;
     int width, height;
 } A;
+/* husk_unity_set_renderer: 0 default, 1 OpenGL ES, 2 Vulkan */
+static int g_unity_renderer;
 
 /* -------------------------------------------------------------- crash report */
 
@@ -397,7 +399,8 @@ static void *launch_thread(void *arg)
             .apk_path = A.apk, .data_dir = A.data, .package_name = A.package, .width = A.width, .height = A.height,
             .metal_layer = A.layer, .angle_egl = A.angle, .angle_gles = NULL, .frame_dir = NULL, .frame_every = 0,
         };
-        tl_log_line("unity: starting %s as %s, %dx%d", A.apk, A.package, A.width, A.height);
+        if (g_unity_renderer != 1 && A.vulkan[0]) { tl_vk_configure(A.vulkan, NULL, 0); cfg.vulkan = true; }
+        tl_log_line("unity: starting %s as %s, %dx%d (Vulkan offered: %s)", A.apk, A.package, A.width, A.height, cfg.vulkan ? "yes" : "no");
         tl_audio_install();
         ok = tl_unity_start(&cfg) && tl_unity_run();
     }
@@ -552,6 +555,7 @@ void husk_native_set_system_files(const char *cacerts_dir, const char *fonts_roo
 }
 /* Where MoltenVK is: Unreal's Vulkan renderer runs on it. Before the launch call. */
 void husk_ue4_set_vulkan(const char *dylib) { snprintf(A.vulkan, sizeof(A.vulkan), "%s", dylib ? dylib : ""); }
+void husk_unity_set_renderer(int renderer) { g_unity_renderer = renderer; }
 void tl_set_shared_storage(const char *dir);
 void husk_native_set_shared_storage(const char *dir) { tl_set_shared_storage(dir); }
 

@@ -26,6 +26,7 @@ typedef struct tl_unity_config {
     const char *angle_gles;      /* path to ANGLE's libGLESv2, or NULL */
     const char *frame_dir;       /* host tests: write frames here instead of presenting */
     int frame_every;
+    bool vulkan;                 /* a Unity 6 engine draws with Vulkan (tl_vk_configure first); older ones keep OpenGL ES */
 } tl_unity_config;
 
 /* Load the engine and run its startup. Returns false (with the reason logged) on failure. */

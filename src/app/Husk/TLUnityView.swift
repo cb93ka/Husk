@@ -42,6 +42,8 @@ final class TLUnityUIView: UIView, UIKeyInput {
     private let extraApks: [String]
     private let dataDir: String
     let engine: TLNativeEngine
+    /// husk_unity_set_renderer's choice for a Unity game (TLAppSettings.Renderer.code), set before the view is laid out.
+    var renderer: Int32 = 0
     /// A portrait game is told its size when the screen is taller than wide, as a landscape one is when it is wider.
     private let portrait: Bool
     private(set) var launched = false
@@ -321,7 +323,11 @@ final class TLUnityUIView: UIView, UIKeyInput {
             }
             started = husk_flutter_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
         case .minecraft: started = husk_gameactivity_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
-        case .unity: started = husk_unity_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
+        case .unity:
+            // A Unity 6 game draws with Vulkan on MoltenVK unless its settings say OpenGL ES; older Unity ignores it.
+            if renderer != 1, let fw = Bundle.main.privateFrameworksPath { husk_ue4_set_vulkan(fw + "/MoltenVK.framework/MoltenVK") }
+            husk_unity_set_renderer(renderer)
+            started = husk_unity_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
         }
         if !started { HuskLog.log("tl", "native: launch refused") }
     }
@@ -575,6 +581,7 @@ struct TLUnityScreen: UIViewRepresentable {
     var engine: TLNativeEngine = .unity
     var portrait = false
     var scale: CGFloat = 2
+    var renderer: Int32 = 0
     var onStats: ((String) -> Void)? = nil
     var onThreeFingerTap: (() -> Void)? = nil
     /// One view per game for the life of the process. The engine's GPU surface belongs to this view's layer and an
@@ -582,9 +589,11 @@ struct TLUnityScreen: UIViewRepresentable {
     private static var shared: [String: TLUnityUIView] = [:]
 
     /// The game's one view, made the first time it is asked for.
-    static func view(apk: String, extraApks: [String], dataDir: String, engine: TLNativeEngine, portrait: Bool, scale: CGFloat) -> TLUnityUIView {
+    static func view(apk: String, extraApks: [String], dataDir: String, engine: TLNativeEngine, portrait: Bool, scale: CGFloat,
+                     renderer: Int32 = 0) -> TLUnityUIView {
         if let view = shared[apk] { return view }
         let view = TLUnityUIView(apk: apk, extraApks: extraApks, dataDir: dataDir, engine: engine, portrait: portrait, scale: scale)
+        view.renderer = renderer
         shared[apk] = view
         return view
     }
@@ -596,6 +605,7 @@ struct TLUnityScreen: UIViewRepresentable {
             view.onStats = onStats; view.onThreeFingerTap = onThreeFingerTap; return view
         }
         let view = TLUnityUIView(apk: apk, extraApks: extraApks, dataDir: dataDir, engine: engine, portrait: portrait, scale: scale)
+        view.renderer = renderer
         view.onStats = onStats
         view.onThreeFingerTap = onThreeFingerTap
         Self.shared[apk] = view
@@ -738,7 +748,8 @@ struct TLCocosAttemptView: View {
                     // The game always has the whole screen: it is told its size once, as it starts, so nothing may take space from it.
                     // The bar and the log are drawn over it instead, and hiding them shows everything underneath.
                     TLUnityScreen(apk: apk, extraApks: Array(app.apks.dropFirst()), dataDir: dataDir, engine: engine, portrait: portrait,
-                                  scale: settings.resolution.scale, onStats: { stats = $0 }, onThreeFingerTap: { toggleInterface() })
+                                  scale: settings.resolution.scale, renderer: settings.renderer.code,
+                                  onStats: { stats = $0 }, onThreeFingerTap: { toggleInterface() })
                         .background(Color.black)
                     .overlay {
                         // A game whose menus answer only a controller: with none paired, one on the glass. Hiding the bar leaves

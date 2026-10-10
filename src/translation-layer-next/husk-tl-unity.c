@@ -17,6 +17,7 @@
 #include "husk-tl-gamepad.h"
 #include "husk-tl-jni.h"
 #include "husk-tl-ld.h"
+#include "husk-tl-vulkan.h"
 
 void tl_jni_hle_install(void);
 void tl_hle_configure(const char *pkg, const char *apk, const char *data, int w, int h);
@@ -40,6 +41,7 @@ static struct {
     const char *player_cls;  /* the class the engine registered the player's natives on */
     pthread_t ui;
     bool ui_started;
+    bool vulkan;             /* the engine was told -force-vulkan */
 } U;
 
 /*
@@ -170,6 +172,13 @@ static void load_engine(void)
     if (!tl_jni_native(UNITY_PLAYER, "nativeRender", "()Z") && tl_jni_native(UNITY_PLAYER_AOS, "nativeRender", "()Z")) {
         U.player_cls = UNITY_PLAYER_AOS;
         tl_log_line("unity: Unity 6 player (%s)", U.player_cls);
+        /* Vulkan, on MoltenVK: under ANGLE's OpenGL ES 3.0 a Unity 6 game has no compute, so its characters go unlit (black),
+         * and only Unity 6 takes its command line (-force-vulkan) through initJni. The layer is then Vulkan's. */
+        if (U.cfg.vulkan && tl_vk_available()) {
+            U.vulkan = true;
+            tl_egl_offscreen_windows(true);
+        }
+        tl_log_line("unity: renderer %s", U.vulkan ? "Vulkan (MoltenVK)" : "OpenGL ES (ANGLE)");
     }
     U.player = tl_jni_new_object(tl_jni_class(U.player_cls));
     U.loaded = ok != 0;
@@ -252,7 +261,7 @@ static void init_player(void)
          * activity or service player (1 is GameActivity), and the string is the player's extra arguments, "" by default. */
         typedef void (*init_fn)(void *env, void *self, void *ctx, uintptr_t type, void *args);
         init_fn init = (init_fn)native_of(UNITY_PLAYER, "initJni", "(Landroid/content/Context;ILjava/lang/String;)V");
-        if (init) init(tl_jni_env(), U.player, U.activity, 0, tl_jni_new_string(""));
+        if (init) init(tl_jni_env(), U.player, U.activity, 0, tl_jni_new_string(U.vulkan ? "-force-vulkan" : ""));
     }
     tl_log_line("unity: initJni done");
     /* The rest of the UnityPlayer constructor: the helpers it builds, whose constructors each call a

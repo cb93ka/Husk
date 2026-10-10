@@ -49,6 +49,27 @@ struct TLAppSettings: Codable, Equatable {
         }
     }
 
+    /// What a Unity 6 game draws with. Older Unity games always use OpenGL ES.
+    enum Renderer: String, Codable, CaseIterable, Identifiable {
+        case auto, gles, vulkan
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .auto: return "Automatic"
+            case .gles: return "OpenGL ES"
+            case .vulkan: return "Vulkan"
+            }
+        }
+        /// husk_unity_set_renderer's number.
+        var code: Int32 {
+            switch self {
+            case .auto: return 0
+            case .gles: return 1
+            case .vulkan: return 2
+            }
+        }
+    }
+
     /// When the on-screen controller is offered.
     enum PadMode: String, Codable, CaseIterable, Identifiable {
         /// For the games that cannot be played without a controller (Unreal, PC games through DXVK), when none is connected.
@@ -80,6 +101,7 @@ struct TLAppSettings: Codable, Equatable {
     var orientation: Orientation = .auto
     var window: WindowMode = .auto
     var resolution: Resolution = .high
+    var renderer: Renderer = .auto
     /// The frames-per-second readout in the top bar.
     var showStats = true
     /// Start with nothing over the picture: no bar, no controller, no readout. Three fingers tapped together bring them back.
@@ -101,6 +123,7 @@ struct TLAppSettings: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         orientation = try c.decodeIfPresent(Orientation.self, forKey: .orientation) ?? .auto
         resolution = try c.decodeIfPresent(Resolution.self, forKey: .resolution) ?? .high
+        renderer = try c.decodeIfPresent(Renderer.self, forKey: .renderer) ?? .auto
         showStats = try c.decodeIfPresent(Bool.self, forKey: .showStats) ?? true
         cleanView = try c.decodeIfPresent(Bool.self, forKey: .cleanView) ?? false
         keepAwake = try c.decodeIfPresent(Bool.self, forKey: .keepAwake) ?? true
@@ -186,12 +209,17 @@ struct TLAppSettingsView: View {
                 Picker("Resolution", selection: $settings.resolution) {
                     ForEach(TLAppSettings.Resolution.allCases) { Text($0.title).tag($0) }
                 }
+                if app.report?.nativeEngine == .unity {
+                    Picker("Graphics", selection: $settings.renderer) {
+                        ForEach(TLAppSettings.Renderer.allCases) { Text($0.title).tag($0) }
+                    }
+                }
                 Toggle("Performance readout", isOn: $settings.showStats)
                 Toggle("Keep the screen on", isOn: $settings.keepAwake)
             } header: {
                 Text("Display")
             } footer: {
-                Text("\(settings.resolution.detail) Orientation and resolution apply the next time the game starts, and a game already "
+                Text("\(settings.resolution.detail) \(app.report?.nativeEngine == .unity ? "Graphics applies to Unity 6 games: Automatic and Vulkan draw with Vulkan, which lights characters that OpenGL ES leaves black. " : "")Orientation and resolution apply the next time the game starts, and a game already "
                    + "running in this session needs Husk closed and opened again.")
             }
 

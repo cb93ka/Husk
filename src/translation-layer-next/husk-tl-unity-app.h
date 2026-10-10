@@ -56,6 +56,8 @@ bool husk_godot_launch(const char *apk, const char *data_dir, void *metal_layer,
 bool husk_gta_launch(const char *apk, const char *data_dir, void *metal_layer, int width, int height,
                      const char *angle_dylib, const char *ca_bundle);
 void husk_ue4_set_vulkan(const char *dylib);
+/* How a Unity 6 game draws: 0 the default (Vulkan when husk_ue4_set_vulkan named MoltenVK), 1 OpenGL ES, 2 Vulkan. Call before husk_unity_launch. */
+void husk_unity_set_renderer(int renderer);
 
 /* Flutter apps (libflutter.so): the engine and the app's Dart run natively; Impeller draws through ANGLE. */
 bool husk_flutter_launch(const char *apk, const char *data_dir, void *metal_layer, int width, int height,
