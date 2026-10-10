@@ -568,6 +568,11 @@ static void ClassLoader_findLibrary(tl_jcall *c) { char p[300]; snprintf(p, size
 static void SP_getInt(tl_jcall *c) { c->ret = vi(c->args[1].i); }
 static void SP_getString(tl_jcall *c) { c->ret = vl(c->args[1].l ? tl_jni_ref(c->args[1].l) : NULL); }
 static void SP_getBoolean(tl_jcall *c) { c->ret = vz(c->args[1].z); }
+/* Unity's PlayerPrefs.GetFloat: the caller's default, as for the others. Zero instead turned GoreBox's render scale and every
+ * slider to their minimum, so the world drew at a few pixels and was stretched to a smear. */
+static void SP_getFloat(tl_jcall *c) { c->ret = vf(c->args[1].f); }
+static void SP_getLong(tl_jcall *c) { c->ret = c->args[1]; }
+static void SP_contains(tl_jcall *c) { c->ret = vz(0); }
 static void SP_edit(tl_jcall *c) { c->ret = vl(make("android/content/SharedPreferences$Editor")); }
 static void Editor_self(tl_jcall *c) { c->ret = vl(tl_jni_ref(c->self)); }
 static void Editor_noop(tl_jcall *c) { (void)c; }
@@ -1002,6 +1007,11 @@ static const tl_jhle k_hle[] = {
     M("android/content/SharedPreferences", "getInt", "(Ljava/lang/String;I)I", SP_getInt),
     M("android/content/SharedPreferences", "getString", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", SP_getString),
     M("android/content/SharedPreferences", "getBoolean", "(Ljava/lang/String;Z)Z", SP_getBoolean),
+    M("android/content/SharedPreferences", "getFloat", "(Ljava/lang/String;F)F", SP_getFloat),
+    M("android/content/SharedPreferences", "getLong", "(Ljava/lang/String;J)J", SP_getLong),
+    M("android/content/SharedPreferences", "contains", "(Ljava/lang/String;)Z", SP_contains),
+    M("android/content/SharedPreferences$Editor", "putFloat", "(Ljava/lang/String;F)Landroid/content/SharedPreferences$Editor;", Editor_self),
+    M("android/content/SharedPreferences$Editor", "putLong", "(Ljava/lang/String;J)Landroid/content/SharedPreferences$Editor;", Editor_self),
     M("android/content/SharedPreferences", "edit", "()Landroid/content/SharedPreferences$Editor;", SP_edit),
     M("android/content/SharedPreferences$Editor", "putInt", "(Ljava/lang/String;I)Landroid/content/SharedPreferences$Editor;", Editor_self),
     M("android/content/SharedPreferences$Editor", "putString", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/SharedPreferences$Editor;", Editor_self),

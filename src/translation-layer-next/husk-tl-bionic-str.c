@@ -619,6 +619,13 @@ const tl_bionic_entry tl_tab_str[] = {
     TL_DIRECT(sqrt), TL_DIRECT(fmin), TL_DIRECT(fmax), TL_DIRECT(frexp), TL_DIRECT(asinh), TL_DIRECT(tanh),
     TL_DIRECT(tanhf), TL_DIRECT(coshf), TL_DIRECT(asinhf),
     TL_DIRECT(acoshf), TL_DIRECT(atanhf), TL_DIRECT(expm1f), TL_DIRECT(log1pf),
+    /* Rounding and the rest of the float family: usually inlined, but Unity 6's libunity imports nearbyintf and remainderf, and
+     * a stub returning 0 for those breaks terrain and UI layout without a crash. */
+    TL_DIRECT(nearbyintf), TL_DIRECT(nearbyint), TL_DIRECT(rintf), TL_DIRECT(lrintf), TL_DIRECT(lrint), TL_DIRECT(llrintf),
+    TL_DIRECT(llrint), TL_DIRECT(lroundf), TL_DIRECT(lround), TL_DIRECT(llroundf), TL_DIRECT(roundf), TL_DIRECT(truncf),
+    TL_DIRECT(floorf), TL_DIRECT(ceilf), TL_DIRECT(remainderf), TL_DIRECT(remquof), TL_DIRECT(remquo), TL_DIRECT(fmaf),
+    TL_DIRECT(fma), TL_DIRECT(fdimf), TL_DIRECT(copysignf), TL_DIRECT(erfcf), TL_DIRECT(tgammaf), TL_DIRECT(lgammaf),
+    TL_DIRECT(scalblnf), TL_DIRECT(logbf), TL_DIRECT(fminf), TL_DIRECT(fmaxf),
     TL_WRAP("__isnanf", b___isnanf), TL_WRAP("__fpclassifyd", b___fpclassifyd),
     /* locale.h */
     TL_WRAP("setlocale", b_setlocale), TL_WRAP("newlocale", b_newlocale), TL_DIRECT(freelocale), TL_DIRECT(uselocale),
