@@ -49,7 +49,7 @@ struct TLAppSettings: Codable, Equatable {
         }
     }
 
-    /// What a Unity 6 game draws with. Older Unity games always use OpenGL ES.
+    /// What a Unity 6 or Godot 4 game draws with. Older Unity games, and Godot projects made for its Compatibility renderer, use OpenGL ES.
     enum Renderer: String, Codable, CaseIterable, Identifiable {
         case auto, gles, vulkan
         var id: String { rawValue }
@@ -209,7 +209,7 @@ struct TLAppSettingsView: View {
                 Picker("Resolution", selection: $settings.resolution) {
                     ForEach(TLAppSettings.Resolution.allCases) { Text($0.title).tag($0) }
                 }
-                if app.report?.nativeEngine == .unity {
+                if app.report?.nativeEngine == .unity || app.report?.nativeEngine == .godot {
                     Picker("Graphics", selection: $settings.renderer) {
                         ForEach(TLAppSettings.Renderer.allCases) { Text($0.title).tag($0) }
                     }
@@ -219,7 +219,7 @@ struct TLAppSettingsView: View {
             } header: {
                 Text("Display")
             } footer: {
-                Text("\(settings.resolution.detail) \(app.report?.nativeEngine == .unity ? "Graphics applies to Unity 6 games: Automatic and Vulkan draw with Vulkan, which lights characters that OpenGL ES leaves black. " : "")Orientation and resolution apply the next time the game starts, and a game already "
+                Text("\(settings.resolution.detail) \(app.report?.nativeEngine == .unity ? "Graphics applies to Unity 6 games: Automatic and Vulkan draw with Vulkan, which lights characters that OpenGL ES leaves black. " : app.report?.nativeEngine == .godot ? "Graphics applies to Godot 4 games made for Vulkan: Automatic and Vulkan draw with it; OpenGL ES uses Godot's Compatibility renderer. " : "")Orientation and resolution apply the next time the game starts, and a game already "
                    + "running in this session needs Husk closed and opened again.")
             }
 

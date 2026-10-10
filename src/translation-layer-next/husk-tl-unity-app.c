@@ -364,8 +364,10 @@ static void *launch_thread(void *arg)
             .apk_path = A.apk, .data_dir = A.data, .package_name = A.package, .width = A.width, .height = A.height,
             .metal_layer = A.layer, .angle_egl = A.angle, .angle_gles = NULL, .frame_dir = NULL, .frame_every = 0,
         };
-        /* Not offered Vulkan: Godot 4 projects run on the Compatibility renderer (on MoltenVK a .NET project's GPU work timed out). */
-        tl_log_line("godot: starting %s as %s, %dx%d", A.apk, A.package, A.width, A.height);
+        /* Forward+ and Mobile projects draw with Vulkan on MoltenVK unless the game's settings say OpenGL ES; then, and for
+         * Compatibility projects, OpenGL ES through ANGLE. */
+        if (g_unity_renderer != 1 && A.vulkan[0]) { tl_vk_configure(A.vulkan, NULL, 0); cfg.vulkan = true; }
+        tl_log_line("godot: starting %s as %s, %dx%d (Vulkan offered: %s)", A.apk, A.package, A.width, A.height, cfg.vulkan ? "yes" : "no");
         tl_audio_install();
         ok = tl_godot_start(&cfg) && tl_godot_run();
     } else if (A.engine == ENGINE_GTA) {

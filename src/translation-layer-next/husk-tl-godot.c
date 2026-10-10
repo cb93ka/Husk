@@ -135,6 +135,8 @@ bool tl_godot_start(const tl_godot_config *cfg)
     tl_hle_configure(cfg->package_name, cfg->apk_path, cfg->data_dir, cfg->width, cfg->height);
     tl_jni_hle_install();
     tl_godot_hle_install(cfg->package_name, cfg->apk_path, cfg->data_dir, cfg->width, cfg->height);
+    /* Godot presents through Swappy without checking that it started: it needs Swappy's Java class (husk-tl-jni-swappy.c). */
+    { void tl_swappy_enable(bool on); tl_swappy_enable(true); }
     /* MoltenVK loaded before the engine looks for Vulkan (its setup checks for it). */
     if (cfg->vulkan) tl_vk_available();
 
@@ -415,7 +417,7 @@ static void *gl_main(void *arg)
         drain_events();
         int64_t t0 = now_ns();
         /* step() says whether the frame is ready to show (false while loading, or when nothing changed in low-processor mode). */
-        if (step(env, cls)) swapBuffers(dpy, surf);
+        if (step(env, cls) && !U.vulkan) swapBuffers(dpy, surf);     /* on Vulkan the engine presents its own frames */
         int64_t t1 = now_ns();
         if (tl_jni_pending()) tl_jni_clear();
         atomic_fetch_add(&U.perf_ns, (unsigned long long)(t1 - t0));

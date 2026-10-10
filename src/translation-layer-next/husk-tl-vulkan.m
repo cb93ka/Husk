@@ -302,6 +302,11 @@ static int w_vkCreateSwapchainKHR(void *device, const void *ci, const void *allo
     const uint8_t *c = ci; uint32_t minimg, fmt, cs, w, h, usage, alpha, mode;
     memcpy(&minimg, c + 32, 4); memcpy(&fmt, c + 36, 4); memcpy(&cs, c + 40, 4); memcpy(&w, c + 44, 4); memcpy(&h, c + 48, 4);
     memcpy(&usage, c + 56, 4); memcpy(&alpha, c + 84, 4); memcpy(&mode, c + 88, 4);
+#if TARGET_OS_OSX
+    /* Mac tests read frames back: a swapchain made only for rendering is framebuffer-only in Metal and cannot be read. */
+    uint8_t copy[160];
+    if (V.frame_dir[0] && !(usage & 1)) { memcpy(copy, ci, sizeof(copy)); uint32_t u = usage | 1; memcpy(copy + 56, &u, 4); ci = copy; }
+#endif
     int r = real ? real(device, ci, alloc, out) : -3;
     tl_log_line("vulkan: vkCreateSwapchainKHR %ux%u images %u format %u colorspace %u usage %#x compositeAlpha %u presentMode %u -> %d", w, h, minimg, fmt, cs, usage, alpha, mode, r);
     /* MoltenVK changes the layer from this thread, which has no run loop: make sure the changes are committed rather than waiting for a transaction nothing will flush. */
@@ -696,6 +701,30 @@ static void resolve_feature_hooks(void *instance)
     if (!g_real_mem_props2khr) g_real_mem_props2khr = (void (*)(void *, vk_mem_props2 *))V.gipa(instance, "vkGetPhysicalDeviceMemoryProperties2KHR");
 }
 
+/* The descriptor limits the device reports, for finding out why an engine turns a shader down (TL_VK_LIMITS logs them).
+ * VkPhysicalDeviceLimits sits at offset 296 of VkPhysicalDeviceProperties. */
+static void props_note(uint8_t *props)
+{
+    uint32_t *l = (uint32_t *)(props + 296);
+    static int said;
+    if (getenv("TL_VK_LIMITS") && said++ < 2)
+        tl_log_line("vulkan: limits: perStage samplers %u ubos %u ssbos %u sampledImages %u storageImages %u resources %u; set samplers %u sampledImages %u; vertexOut %u fragIn %u",
+                    l[68 / 4], l[72 / 4], l[76 / 4], l[80 / 4], l[84 / 4], l[92 / 4], l[96 / 4], l[116 / 4], l[144 / 4], l[200 / 4]);
+}
+static void (*g_real_props)(void *, void *), (*g_real_props2)(void *, void *);
+static void w_vkGetPhysicalDeviceProperties(void *pd, void *props)
+{
+    if (!g_real_props && V.lib) g_real_props = dlsym(V.lib, "vkGetPhysicalDeviceProperties");
+    if (g_real_props) g_real_props(pd, props);
+    props_note(props);
+}
+static void w_vkGetPhysicalDeviceProperties2(void *pd, void *props2)
+{
+    if (!g_real_props2 && V.lib) g_real_props2 = dlsym(V.lib, "vkGetPhysicalDeviceProperties2");
+    if (g_real_props2) g_real_props2(pd, props2);
+    props_note((uint8_t *)props2 + 16);                    /* VkPhysicalDeviceProperties2: sType, pNext, then the properties */
+}
+
 static void *w_vkGetInstanceProcAddr(void *instance, const char *name);
 static void *w_vkGetDeviceProcAddr(void *device, const char *name);
 
@@ -709,6 +738,9 @@ static const struct { const char *name; void *fn; } k_over[] = {
     { "vkCreateSwapchainKHR", w_vkCreateSwapchainKHR },
     { "vkAcquireNextImageKHR", w_vkAcquireNextImageKHR },
     { "vkGetPhysicalDeviceFeatures", w_vkGetPhysicalDeviceFeatures },
+    { "vkGetPhysicalDeviceProperties", w_vkGetPhysicalDeviceProperties },
+    { "vkGetPhysicalDeviceProperties2", w_vkGetPhysicalDeviceProperties2 },
+    { "vkGetPhysicalDeviceProperties2KHR", w_vkGetPhysicalDeviceProperties2 },
     { "vkGetPhysicalDeviceFeatures2", w_vkGetPhysicalDeviceFeatures2 },
     { "vkGetPhysicalDeviceFeatures2KHR", w_vkGetPhysicalDeviceFeatures2KHR },
     { "vkCreateDevice", w_vkCreateDevice },
@@ -742,6 +774,7 @@ static void *w_vkGetDeviceProcAddr(void *device, const char *name)
 {
     if (!name || !vk_ready()) return NULL;
     void *fn = overridden(name);
+    LOG("vulkan: vkGetDeviceProcAddr(%s)%s", name, fn ? " -> Husk's" : "");
     if (fn) return fn;
     typedef void *(*pfn_gdpa)(void *, const char *);
     static pfn_gdpa mvk_gdpa;

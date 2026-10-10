@@ -56,7 +56,8 @@ bool husk_godot_launch(const char *apk, const char *data_dir, void *metal_layer,
 bool husk_gta_launch(const char *apk, const char *data_dir, void *metal_layer, int width, int height,
                      const char *angle_dylib, const char *ca_bundle);
 void husk_ue4_set_vulkan(const char *dylib);
-/* How a Unity 6 game draws: 0 the default (Vulkan when husk_ue4_set_vulkan named MoltenVK), 1 OpenGL ES, 2 Vulkan. Call before husk_unity_launch. */
+/* How a Unity 6 or Godot 4 game draws: 0 the default (Vulkan when husk_ue4_set_vulkan named MoltenVK), 1 OpenGL ES, 2 Vulkan.
+ * Call before husk_unity_launch or husk_godot_launch. */
 void husk_unity_set_renderer(int renderer);
 /* A Godot game's text input: the keyboard requests (1 show, 2 hide), typed text, and Android key codes (67 Delete, 66 Enter). */
 void husk_godot_set_keyboard_handler(void (*handler)(int action));

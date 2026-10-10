@@ -293,7 +293,11 @@ final class TLUnityUIView: UIView, UIKeyInput {
             if let fw = Bundle.main.privateFrameworksPath { husk_ue4_set_vulkan(fw + "/MoltenVK.framework/MoltenVK") }
             started = husk_sdl_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
         case .gta: started = husk_gta_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
-        case .godot: started = husk_godot_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
+        case .godot:
+            // A Godot 4 project on Forward+ or Mobile draws with Vulkan on MoltenVK unless its settings say OpenGL ES.
+            if renderer != 1, let fw = Bundle.main.privateFrameworksPath { husk_ue4_set_vulkan(fw + "/MoltenVK.framework/MoltenVK") }
+            husk_unity_set_renderer(renderer)
+            started = husk_godot_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)
         case .nativeactivity: started = husk_ue4_launch(apk, dataDir, layerPtr, Int32(width), Int32(height), angle, ca)       // the NativeActivity driver; with no Unreal in the APK it runs the plain game
         case .ue4:
             // Unreal draws with Vulkan, which on this device is MoltenVK, a framework of the app's own.
