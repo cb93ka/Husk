@@ -326,6 +326,15 @@ static void w_glCopyImageSubData(unsigned sn, unsigned st, int sl, int sx, int s
                                  uint64_t dl, uint64_t dx, uint64_t dy, uint64_t dz, uint64_t w, uint64_t h, uint64_t d)
 { r_glCopyImageSubData(sn, st, sl, sx, sy, sz, dn, dt, (int)dl, (int)dx, (int)dy, (int)dz, (int)w, (int)h, (int)d); }
 
+/*
+ * glClientWaitSync without GL_SYNC_FLUSH_COMMANDS_BIT waits for a fence whose commands may never reach the GPU: Android's drivers
+ * submit them anyway, ANGLE over Metal keeps them in its command buffer until something flushes it, so the wait runs to its
+ * timeout. Godot's canvas renderer waits that way, 100 ms at a time, and drew at two or three frames a second. The flag is
+ * always added (the specification lets an implementation flush there).
+ */
+static unsigned (*r_glClientWaitSync)(void *, unsigned, uint64_t);
+static unsigned w_glClientWaitSync(void *sync, uint64_t flags, uint64_t timeout) { return r_glClientWaitSync(sync, (unsigned)flags | 0x1u, timeout); }
+
 /* GLboolean arguments: AAPCS64 callers do not extend them, Apple's callee may assume they are. */
 static void (*r_glColorMask)(unsigned, unsigned, unsigned, unsigned);
 static void w_glColorMask(unsigned r, unsigned g, unsigned b, unsigned a) { r_glColorMask(r & 0xff, g & 0xff, b & 0xff, a & 0xff); }
@@ -441,7 +450,7 @@ static void w_glCompileShader(unsigned sh)
 
 #define ADAPT(name) { #name, (void *)w_##name, (void **)&r_##name }
 static const struct { const char *name; void *wrap; void **real; } k_adapt[] = {
-    ADAPT(glBlitFramebuffer), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCopyImageSubData),
+    ADAPT(glBlitFramebuffer), ADAPT(glClientWaitSync), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCopyImageSubData),
     ADAPT(glColorMask), ADAPT(glDepthMask), ADAPT(glVertexAttribPointer), ADAPT(glUniformMatrix2fv),
     ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange),
 };

@@ -375,7 +375,7 @@ static void build_scope(tl_lib *L)
 
 /* Symbol lookup the way a library sees it: its own scope, then the system. */
 /* Functions a driver puts in front of whatever the libraries define: an import of one of these names is bound to the replacement, which can still call the original. */
-#define MAX_INTERPOSE 8
+#define MAX_INTERPOSE 64
 static struct { char name[48]; void *fn; } g_interpose[MAX_INTERPOSE];
 static int g_ninterpose;
 void tl_ld_interpose(const char *name, void *fn)
@@ -1199,7 +1199,13 @@ static uint64_t bind_symbol(tl_lib *L, uint32_t symidx, bool *failed)
     const elf_sym *s = sym_at(L, symidx);
     const char *name = sym_name(L, s);
     uint64_t val = 0;
-    if (s->st_shndx != SHN_UNDEF_ && (s->st_info >> 4) != STB_WEAK_) {
+    void *over = NULL;
+    for (int i = 0; i < g_ninterpose && !over; i++) if (!strcmp(g_interpose[i].name, name)) over = g_interpose[i].fn;
+    if (over) {
+        /* Replaced for every library, the one that defines it too (a library's calls to its own exported functions go
+         * through its PLT, so they can be redirected as well). */
+        val = (uint64_t)(uintptr_t)over;
+    } else if (s->st_shndx != SHN_UNDEF_ && (s->st_info >> 4) != STB_WEAK_) {
         /* Defined here. Search the scope anyway so an earlier library's definition
          * wins, as it does under ELF interposition... except that a library's own
          * definition is what Android's linker uses first for its own symbols. */

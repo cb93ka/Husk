@@ -105,6 +105,32 @@ static jobj *command_line(void)
     return arr;
 }
 
+/* ------------------------------------------------------------ Swappy, bypassed */
+
+static int sw_present(void *queue, const void *info)
+{
+    typedef int (*present_fn)(void *, const void *);
+    static present_fn fn;
+    if (!fn) fn = (present_fn)tl_vk_resolve("vkQueuePresentKHR");
+    return fn ? fn(queue, info) : -3;
+}
+static void sw_extensions(void *pd, uint32_t avail, const void *names, uint32_t *count, char **out)
+{ (void)pd; (void)avail; (void)names; (void)out; if (count) *count = 0; }
+static uint8_t sw_init(void *env, void *activity, void *pd, void *dev, uint64_t swapchain, uint64_t *refresh_ns)
+{ (void)env; (void)activity; (void)pd; (void)dev; (void)swapchain; if (refresh_ns) *refresh_ns = 16666667; return 1; }
+static void sw_noop(void) {}
+
+static void swappy_bypass(void)
+{
+    tl_ld_interpose("SwappyVk_queuePresent", (void *)sw_present);
+    tl_ld_interpose("SwappyVk_determineDeviceExtensions", (void *)sw_extensions);
+    tl_ld_interpose("SwappyVk_initAndGetRefreshCycleDuration", (void *)sw_init);
+    static const char *const noops[] = { "SwappyVk_setQueueFamilyIndex", "SwappyVk_setWindow", "SwappyVk_destroySwapchain",
+                                         "SwappyVk_setSwapIntervalNS", "SwappyVk_setAutoSwapInterval", "SwappyVk_setAutoPipelineMode",
+                                         "SwappyVk_destroyDevice", "SwappyVk_setMaxAutoSwapIntervalNS", "SwappyVk_setFenceTimeoutNS" };
+    for (size_t i = 0; i < sizeof(noops) / sizeof(noops[0]); i++) tl_ld_interpose(noops[i], (void *)sw_noop);
+}
+
 bool tl_godot_start(const tl_godot_config *cfg)
 {
     U.cfg = *cfg;
@@ -135,8 +161,9 @@ bool tl_godot_start(const tl_godot_config *cfg)
     tl_hle_configure(cfg->package_name, cfg->apk_path, cfg->data_dir, cfg->width, cfg->height);
     tl_jni_hle_install();
     tl_godot_hle_install(cfg->package_name, cfg->apk_path, cfg->data_dir, cfg->width, cfg->height);
-    /* Godot presents through Swappy without checking that it started: it needs Swappy's Java class (husk-tl-jni-swappy.c). */
-    { void tl_swappy_enable(bool on); tl_swappy_enable(true); }
+    /* Swappy, the frame pacer Godot presents through, is bypassed: under Husk its pacing held a Vulkan game to a few frames a
+     * second. Its C API, which Godot calls through its PLT, is answered here, and frames go straight to vkQueuePresentKHR. */
+    swappy_bypass();
     /* MoltenVK loaded before the engine looks for Vulkan (its setup checks for it). */
     if (cfg->vulkan) tl_vk_available();
 
