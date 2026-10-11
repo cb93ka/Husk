@@ -4,8 +4,8 @@
 # changed since release 1.1.0, so this workflow takes the built libraries, the guest kernel and the
 # firmware from that release's IPA, builds only the on-device pairing library (Rust) and the app itself,
 # and publishes the IPA as a release of this repository. The Java runtime and the Android system fonts
-# (build/java-runtime, build/android-system) are not part of it: Java-only apps and Flutter fonts need a
-# full local build.
+# (build/java-runtime, build/android-system) are taken from the Lineage guest image the app downloads
+# (scripts/ci_guest_files.sh).
 name: Build IPA
 
 on:
@@ -36,6 +36,20 @@ jobs:
 
       - name: Tools
         run: brew install xcodegen
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Java runtime and system files from the guest image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          brew install qemu e2fsprogs
+          QEMU_IMG="$(brew --prefix)/bin/qemu-img" WORK="$RUNNER_TEMP/guest" ./scripts/ci_guest_files.sh
+          rm -rf "$RUNNER_TEMP/guest"
+          du -sh build/java-runtime build/android-system
 
       - name: Prebuilt libraries and guest files from the base release
         env:
