@@ -17,8 +17,13 @@
 #include "husk-tl-bionic.h"
 #include "husk-tl-dexindex.h"
 #include "husk-tl-ld.h"
+#include "husk-tl-internal.h"
+
+#include <sys/stat.h>
 
 jobj *tl_assetstream_list(const char *path);
+const char *tl_hle_android_id(void);
+void tl_sdl_set_default_arguments(const char *args);
 void tl_sdl_display_metrics(tl_jcall *c);
 jobj *tl_assetstream_file_tree(void);
 static jvalue vi(int i) { jvalue v; v.j = 0; v.i = i; return v; }
@@ -141,6 +146,130 @@ static void luajit_openlibs(void *L)
     if (g_jit_setmode) g_jit_setmode(L, 0, 0 /* LUAJIT_MODE_ENGINE | LUAJIT_MODE_OFF */);
 }
 
+/* ------------------------------------------------------------- Xash3D FWGS */
+
+/*
+ * Xash3D FWGS (Half-Life and Counter-Strike 1.6 ports). The engine finds its game folders under XASH3D_BASEDIR, which its activity sets
+ * along with the game (XASH3D_GAME) before SDL starts; asset files the APK carries (touch layouts, fonts) it reads through the activity's
+ * getAssets/getAssetsList.
+ *
+ * Mobsik's Counter-Strike 1.6 (store.androidapplications.cs16.mobsik) has a launcher that unpacks the game -- assets/cs16-data.zip (valve,
+ * cstrike: 750 MB) and assets/bundled-maps -- into files/game-data-v1 on first start, then opens the game with "-log -port 27522 -port6 27522".
+ * That launcher (and its own room-based matchmaking) is Java that does not run here, so the unpacking is done here, once; the engine's own
+ * server browser is the way online.
+ */
+static bool g_xash;
+
+static void mkdirs_to(char *path)
+{
+    for (char *p = path + 1; *p; p++) if (*p == '/') { *p = 0; mkdir(path, 0755); *p = '/'; }
+}
+
+/* Every entry of `z` under `prefix` written below `out` (the prefix dropped); returns the files written, -1 on a write failure. */
+static long unpack(const tl_zip *z, const char *prefix, const char *out)
+{
+    size_t pl = strlen(prefix); long n = 0;
+    for (size_t i = 0; i < z->count; i++) {
+        const tl_zip_entry *e = &z->entries[i];
+        if (strncmp(e->name, prefix, pl) || !e->name[pl] || strstr(e->name, "..") || e->name[strlen(e->name) - 1] == '/') continue;
+        char path[1400]; snprintf(path, sizeof(path), "%s/%s", out, e->name + pl);
+        mkdirs_to(path);
+        const uint8_t *d; size_t len; bool owned; char err[160];
+        if (!tl_zip_data(z, e, (size_t)1 << 30, &d, &len, &owned, err, sizeof(err))) { tl_log_line("xash: %s: %s", e->name, err); continue; }
+        char tmp[1450]; snprintf(tmp, sizeof(tmp), "%s.part", path);
+        FILE *f = fopen(tmp, "wb");
+        bool ok = f && fwrite(d, 1, len, f) == len;
+        if (f && fclose(f)) ok = false;
+        if (owned) free((void *)d);
+        if (!ok || rename(tmp, path)) { tl_log_line("xash: cannot write %s", path); unlink(tmp); return -1; }
+        n++;
+    }
+    return n;
+}
+
+static bool mobsik_unpack(const char *apk, const char *base)
+{
+    char stamp[800]; snprintf(stamp, sizeof(stamp), "%s/.husk-unpacked", base);
+    struct stat st, ap;
+    if (stat(stamp, &st) == 0 && stat(apk, &ap) == 0 && st.st_mtime >= ap.st_mtime) return true;
+    tl_zip z; char err[160];
+    if (!tl_zip_open(&z, apk, err, sizeof(err))) { tl_log_line("xash: %s", err); return false; }
+    const tl_zip_entry *data = tl_zip_find(&z, "assets/cs16-data.zip");
+    bool ok = false;
+    if (data) {
+        tl_log_line("xash: unpacking the game (%.0f MB) into %s -- the first start takes a while", data->usize / 1048576.0, base);
+        char inner[800]; snprintf(inner, sizeof(inner), "%s.zip.part", base);
+        const uint8_t *d; size_t len; bool owned;
+        mkdirs_to(inner);
+        FILE *f = NULL;
+        if (tl_zip_data(&z, data, (size_t)2 << 30, &d, &len, &owned, err, sizeof(err))) {
+            f = fopen(inner, "wb");
+            ok = f && fwrite(d, 1, len, f) == len;
+            if (f && fclose(f)) ok = false;
+            if (owned) free((void *)d);
+        }
+        tl_zip iz;
+        if (ok && tl_zip_open(&iz, inner, err, sizeof(err))) {
+            long a = unpack(&iz, "", base);
+            tl_zip_close(&iz);
+            long b = a >= 0 ? unpack(&z, "assets/bundled-maps/", base) : -1;
+            ok = a > 0 && b >= 0;
+            tl_log_line("xash: unpacked %ld game files and %ld bundled map files", a, b);
+        } else ok = false;
+        unlink(inner);
+    }
+    tl_zip_close(&z);
+    if (ok) { FILE *f = fopen(stamp, "w"); if (f) fclose(f); }
+    else tl_log_line("xash: unpacking the game failed (is there room on the device?)");
+    return ok;
+}
+
+void tl_xash_prepare(const char *apk, const char *data_dir, const char *package)
+{
+    tl_zip z; char err[160];
+    if (!tl_zip_open(&z, apk, err, sizeof(err))) return;
+    g_xash = tl_zip_find(&z, "lib/arm64-v8a/libxash.so") != NULL;
+    bool mobsik = tl_zip_find(&z, "assets/cs16-data.zip") != NULL;
+    tl_zip_close(&z);
+    if (!g_xash) return;
+    char base[700];
+    if (mobsik) {
+        snprintf(base, sizeof(base), "%s/files/game-data-v1", data_dir);
+        mkdir(base, 0755);
+        mobsik_unpack(apk, base);
+        tl_sdl_set_default_arguments("-log -port 27522 -port6 27522");
+    } else {
+        /* a plain Xash3D port: the game folders where the player puts them, in the app's files */
+        snprintf(base, sizeof(base), "%s/files", data_dir);
+    }
+    setenv("XASH3D_BASEDIR", base, 1);
+    setenv("XASH3D_GAME", (mobsik || strstr(package, "cs16")) ? "cstrike" : "valve", 0);
+    setenv("XASH3D_GAMELIBDIR", "/data/app/lib/arm64", 1);
+    setenv("SDL_ANDROID_BLOCK_ON_PAUSE", "1", 1);
+    tl_log_line("xash: XASH3D_BASEDIR=%s XASH3D_GAME=%s", base, getenv("XASH3D_GAME"));
+}
+
+static void XA_androidID(tl_jcall *c) { jvalue v; v.j = 0; v.l = tl_jni_new_string(tl_hle_android_id()); c->ret = v; }
+static void XA_null(tl_jcall *c) { jvalue v; v.j = 0; v.l = NULL; c->ret = v; }
+static void XA_getAssets(tl_jcall *c) { c->ret = tl_jni_call(c->self, "getAssets", "()Landroid/content/res/AssetManager;", NULL); }
+static void XA_getAssetsList(tl_jcall *c) { jvalue v; v.j = 0; v.l = tl_assetstream_list(c->args[1].l ? Str(c->args[1].l) : ""); c->ret = v; }
+static void XA_messagebox(tl_jcall *c)
+{
+    tl_log_line("xash: message box \"%s\": %s", c->args[1].l ? Str(c->args[1].l) : "", c->args[2].l ? Str(c->args[2].l) : "");
+    c->ret = vi(0);
+}
+#define SDLA_X "org/libsdl/app/SDLActivity"
+static const tl_jhle k_xash[] = {
+    { SDLA_X, "getAndroidID", "()Ljava/lang/String;", XA_androidID },
+    { SDLA_X, "loadAndroidID", "()Ljava/lang/String;", XA_androidID },
+    { SDLA_X, "saveAndroidID", "(Ljava/lang/String;)V", H_void },
+    { SDLA_X, "getCallingPackage", "()Ljava/lang/String;", XA_null },
+    { SDLA_X, "getAssets", "(Z)Landroid/content/res/AssetManager;", XA_getAssets },
+    { SDLA_X, "getAssetsList", "(ZLjava/lang/String;)[Ljava/lang/String;", XA_getAssetsList },
+    { SDLA_X, "messageboxShowMessageBox", "(ILjava/lang/String;Ljava/lang/String;[I[I[Ljava/lang/String;[I)I", XA_messagebox },
+    { NULL, NULL, NULL, NULL }
+};
+
 /* ------------------------------------------------------------------ install */
 
 /* python-for-android (Kivy): the statics PythonActivity.onCreate and Hardware's initialiser fill, which Python reads through pyjnius
@@ -161,4 +290,5 @@ void tl_sdl_apps_install(const char *package)
     if (!strcmp(package, "org.broguece.game")) tl_jni_register_hle(k_brogue);
     if (tl_dexidx_has_class(LOVE)) { tl_jni_register_hle(k_love); tl_ld_interpose("luaL_openlibs", (void *)luajit_openlibs); }
     if (!strcmp(package, "org.pgnapps.pk2")) tl_jni_register_hle(k_pk2);
+    if (g_xash) tl_jni_register_hle(k_xash);
 }

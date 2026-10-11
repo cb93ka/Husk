@@ -439,7 +439,7 @@ int main(int argc, char **argv)
     if (getenv("TL_DATA")) snprintf(tmp, sizeof(tmp), "%s", getenv("TL_DATA")); else mkdtemp(tmp);   /* TL_DATA: keep the data dir between runs */
     const char *cef = "/Users/davi/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/Frameworks/Chromium Embedded Framework.framework/Versions/A/Libraries";
     char egl[600], gles[600]; snprintf(egl, sizeof(egl), "%s/libEGL.dylib", cef); snprintf(gles, sizeof(gles), "%s/libGLESv2.dylib", cef);
-    char frames[] = "/Volumes/GTAV/husk2/tmp/husk-sdlframes-XXXXXX"; mkdtemp(frames);
+    char frames[600]; snprintf(frames, sizeof(frames), "%s/husk-sdlframes-XXXXXX", getenv("TL_TMP") ? getenv("TL_TMP") : "/tmp"); mkdtemp(frames);
     fprintf(stderr, "frames: %s\ndata: %s\n", frames, tmp);
     int w = argc > 4 ? atoi(argv[3]) : 1200, h = argc > 4 ? atoi(argv[4]) : 552;
     tl_ga_config cfg = { .apk_path = argv[1], .data_dir = tmp, .package_name = getenv("TL_PKG") ? getenv("TL_PKG") : "com.vectorunit.cobalt.googleplay", .width = w, .height = h,

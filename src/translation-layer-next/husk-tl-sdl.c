@@ -236,6 +236,18 @@ static void *native_of(const char *cls, const char *name, const char *sig)
     return fn;
 }
 
+/* SDLActivity.requestPermission(permission, code): SDL waits, sleeping, until nativePermissionResult answers -- SDL 2's HID layer asks
+ * for Bluetooth as its joysticks start (Xash3D hung there). Answered at once: Bluetooth no (controllers come through Husk's gamepad
+ * layer, not Bluetooth HID), anything else yes. */
+static void A_requestPermission(tl_jcall *c)
+{
+    const char *perm = tl_jni_string(c->args[0].l);
+    void (*result)(void *, void *, int, uint8_t) = native_of(SDLA, "nativePermissionResult", "(IZ)V");
+    bool granted = !(perm && strstr(perm, "BLUETOOTH"));
+    tl_log_line("sdl: permission %s -> %s", perm ? perm : "?", granted ? "granted" : "denied");
+    if (result) result(tl_jni_env(), tl_jni_class_object(SDLA), c->args[1].i, granted);
+}
+
 /* SDLActivity.initTouch walks the input devices and reports each touch screen; there is one. */
 static void A_initTouch(tl_jcall *c)
 {
@@ -413,7 +425,7 @@ static const tl_jhle k_hle[] = {
     M_(SDLA, "minimizeWindow", "()V", A_void),
     M_(SDLA, "sendMessage", "(II)Z", A_sendMessage),
     M_(SDLA, "openURL", "(Ljava/lang/String;)Z", A_false),
-    M_(SDLA, "requestPermission", "(Ljava/lang/String;I)V", A_void),
+    M_(SDLA, "requestPermission", "(Ljava/lang/String;I)V", A_requestPermission),
     M_(SDLA, "showToast", "(Ljava/lang/String;IIII)Z", A_true),
     M_(SDLA, "clipboardGetText", "()Ljava/lang/String;", A_emptyString),
     M_(SDLA, "clipboardHasText", "()Z", A_false),
@@ -682,6 +694,8 @@ bool tl_sdl_start(const tl_ga_config *cfg, const char *activity_class)
     snprintf(dir, sizeof(dir), "%s/sdcard/Android/data/%s/files", S.data, S.pkg); mkdirs(dir);
     /* python-for-android (Kivy, pygame): the app and Python unpacked, and the environment its start.c reads. */
     { bool tl_python_prepare(const char *apk, const char *data_dir); tl_python_prepare(S.apk, S.data); }
+    /* Xash3D (Half-Life, Counter-Strike): the game data its launcher unpacks, and the environment it sets. */
+    { void tl_xash_prepare(const char *apk, const char *data_dir, const char *package); tl_xash_prepare(S.apk, S.data, S.pkg); }
 
     tl_set_data_dir(cfg->data_dir);
     tl_nwindow_configure(cfg->width, cfg->height, cfg->metal_layer);
@@ -774,8 +788,10 @@ bool tl_sdl_start(const tl_ga_config *cfg, const char *activity_class)
     return true;
 }
 
-static char g_sdl_args[1024];
+static char g_sdl_args[1024], g_sdl_default_args[512];
 void tl_sdl_set_arguments(const char *args) { snprintf(g_sdl_args, sizeof(g_sdl_args), "%s", args ? args : ""); }
+/* What the game's own activity passes when the player set none (a launcher's fixed arguments). */
+void tl_sdl_set_default_arguments(const char *args) { snprintf(g_sdl_default_args, sizeof(g_sdl_default_args), "%s", args ? args : ""); }
 
 /* SDLMain: SDL_main runs on a thread of its own, started once the surface is ready. */
 static void *sdl_main_thread(void *arg)
@@ -791,12 +807,12 @@ static void *sdl_main_thread(void *arg)
     if (init_main) init_main(env, cls);
     tl_log_line("sdl: SDL_main starting");
     /* SDLActivity.getArguments(): what the player set as the game's launch arguments, split at spaces */
-    char args[sizeof(g_sdl_args)]; snprintf(args, sizeof(args), "%s", g_sdl_args);
+    char args[sizeof(g_sdl_args)]; snprintf(args, sizeof(args), "%s", g_sdl_args[strspn(g_sdl_args, " ")] ? g_sdl_args : g_sdl_default_args);
     const char *argv[64]; int argc = 0;
     for (char *t = strtok(args, " "); t && argc < 64; t = strtok(NULL, " ")) argv[argc++] = t;
     jobj *jargs = tl_jni_new_obj_array(tl_jni_class("java/lang/String"), (uint32_t)argc);
     for (int i = 0; i < argc; i++) jargs->oarr.v[i] = tl_jni_new_string(argv[i]);
-    if (argc) tl_log_line("sdl: launch arguments: %s", g_sdl_args);
+    if (argc) { char shown[sizeof(g_sdl_args)] = ""; for (int i = 0; i < argc; i++) { strlcat(shown, i ? " " : "", sizeof(shown)); strlcat(shown, argv[i], sizeof(shown)); } tl_log_line("sdl: launch arguments: %s", shown); }
     int r = run_main(env, cls, tl_jni_new_string(S.main_lib[0] ? S.main_lib : "libmain.so"), tl_jni_new_string(S.main_fn[0] ? S.main_fn : "SDL_main"), jargs);
     tl_log_line("sdl: SDL_main returned %d", r);
     if (cleanup) cleanup(env, cls);
