@@ -130,6 +130,7 @@ static void *native_of(const char *cls, const char *name, const char *sig)
 
 static void load_engine(void);
 
+static void kb_install(void);
 bool tl_unity_start(const tl_unity_config *cfg)
 {
     U.cfg = *cfg;
@@ -142,6 +143,7 @@ bool tl_unity_start(const tl_unity_config *cfg)
     tl_jni_init();
     tl_hle_configure(cfg->package_name, cfg->apk_path, cfg->data_dir, cfg->width, cfg->height);
     tl_jni_hle_install();
+    kb_install();
 
     /* new UnityPlayer(activity): the Java side's own constructor calls loadNative(dir),
      * which is System.load(dir + "/libmain.so") followed by NativeLoader.load(dir). */
@@ -201,6 +203,71 @@ static void call_native(const char *name, const char *sig, uintptr_t a, uintptr_
     call_native_on(U.player_cls, U.player, name, sig, a, b);
 }
 #define NATIVE_VOID(name, sig, a, b) call_native(name, sig, (uintptr_t)(a), (uintptr_t)(b))
+
+/* ------------------------------------------------------------------ keyboard
+ *
+ * A text field (TouchScreenKeyboard.Open, an InputField, TextMeshPro's) asks the player's Java for the keyboard:
+ * showSoftInput(text, type, autocorrection, multiline, secure, alert, placeholder, characterLimit, ...) -- its tail differs
+ * between Unity versions, so it is matched by name. What is typed goes back as the whole string (nativeSetInputString), and
+ * the end as nativeSoftInputClosed (Done) or nativeSoftInputCanceled. Without this no Unity game could take text. */
+static void (*g_kbd)(int action, const char *text, int flags);
+void tl_unity_set_keyboard_handler(void (*h)(int action, const char *text, int flags)) { g_kbd = h; }
+static void *unity_native_any(const char *name, const char *sig)
+{
+    void *fn = tl_jni_native(U.player_cls ? U.player_cls : UNITY_PLAYER, name, sig);
+    if (!fn) fn = tl_jni_native(UNITY_PLAYER, name, sig);
+    if (!fn) fn = tl_jni_native(UNITY_PLAYER_AOS, name, sig);
+    return fn;
+}
+static void KB_show(tl_jcall *c)
+{
+    int nargs = tl_jni_sig_nargs(c->sig);
+    const char *text = nargs > 0 && c->args[0].l ? tl_jni_string(c->args[0].l) : "";
+    int type = nargs > 1 ? c->args[1].i : 0;
+    int flags = (type & 0xff) | (nargs > 3 && c->args[3].z ? 0x100 : 0) | (nargs > 4 && c->args[4].z ? 0x200 : 0);
+    tl_log_line("unity: the game asks for the keyboard (type %d%s%s)", type, flags & 0x100 ? ", multi-line" : "", flags & 0x200 ? ", secure" : "");
+    void (*vis)(void *, void *, uint8_t) = unity_native_any("nativeSetKeyboardIsVisible", "(Z)V");
+    if (vis) vis(tl_jni_env(), U.player, 1);
+    if (g_kbd) g_kbd(1, text ? text : "", flags);
+}
+static void KB_hide(tl_jcall *c)
+{
+    (void)c;
+    void (*vis)(void *, void *, uint8_t) = unity_native_any("nativeSetKeyboardIsVisible", "(Z)V");
+    if (vis) vis(tl_jni_env(), U.player, 0);
+    if (g_kbd) g_kbd(0, NULL, 0);
+}
+static void KB_setText(tl_jcall *c) { const char *t = tl_jni_sig_nargs(c->sig) > 0 && c->args[0].l ? tl_jni_string(c->args[0].l) : ""; if (g_kbd) g_kbd(2, t ? t : "", 0); }
+static void KB_noop(tl_jcall *c) { (void)c; }
+static void KB_false(tl_jcall *c) { c->ret.j = 0; }
+#define KBE(cls) { cls, "showSoftInput", NULL, KB_show }, { cls, "hideSoftInput", NULL, KB_hide }, { cls, "setSoftInputStr", NULL, KB_setText }, \
+                 { cls, "setCharacterLimit", NULL, KB_noop }, { cls, "setHideInputField", NULL, KB_noop }, { cls, "setSelection", NULL, KB_noop }, \
+                 { cls, "isUaaLUseCase", NULL, KB_false }, { cls, "hidePreservedContent", NULL, KB_noop }
+static const tl_jhle k_keyboard[] = { KBE(UNITY_PLAYER), KBE(UNITY_PLAYER_AOS), { NULL, NULL, NULL, NULL } };
+static void kb_install(void) { tl_jni_register_hle(k_keyboard); }
+
+static char g_kb_text[4096];
+static int g_kb_end;            /* 1 done, 2 canceled */
+static void kb_send(void)
+{
+    void (*set)(void *, void *, void *) = unity_native_any("nativeSetInputString", "(Ljava/lang/String;)V");
+    if (set) { set(tl_jni_env(), U.player, tl_jni_new_string(g_kb_text)); if (tl_jni_pending()) tl_jni_clear(); }
+    if (g_kb_end) {
+        void (*end)(void *, void *) = unity_native_any(g_kb_end == 2 ? "nativeSoftInputCanceled" : "nativeSoftInputClosed", "()V");
+        if (!end && g_kb_end == 2) end = unity_native_any("nativeSoftInputClosed", "()V");
+        if (end) { end(tl_jni_env(), U.player); if (tl_jni_pending()) tl_jni_clear(); }
+        void (*vis)(void *, void *, uint8_t) = unity_native_any("nativeSetKeyboardIsVisible", "(Z)V");
+        if (vis) vis(tl_jni_env(), U.player, 0);
+    }
+}
+/* The field's whole text as the player edits it, and then its end: 1 Done, 2 the keyboard closed without Done. */
+void tl_unity_input_text(const char *utf8, int end)
+{
+    if (!U.player) return;
+    snprintf(g_kb_text, sizeof(g_kb_text), "%s", utf8 ? utf8 : "");
+    g_kb_end = end;
+    ui_sync(kb_send);
+}
 
 static void *unity_main(void *arg)
 {

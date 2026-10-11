@@ -39,6 +39,10 @@ bool tl_unity_run(void);
 unsigned long tl_unity_frames(void);
 /* The game quit by itself (Application.Quit: the player render loop ended). */
 bool tl_unity_ended(void);
+/* The game's text fields: the handler is told 1 (show, with the field's text and flags: Unity's keyboard type in the low byte,
+ * 0x100 multi-line, 0x200 secure), 0 (hide) or 2 (the game set the text). What is typed goes back with tl_unity_input_text. */
+void tl_unity_set_keyboard_handler(void (*h)(int action, const char *text, int flags));
+void tl_unity_input_text(const char *utf8, int end);
 
 /*
  * A touch, in screen pixels with y down. phase 0 begins it, 1 moves it, 2 ends it (3 cancels all).

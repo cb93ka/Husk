@@ -64,6 +64,10 @@ void husk_ue4_set_vulkan(const char *dylib);
 void husk_unity_set_renderer(int renderer);
 /* A Godot game's text input: the keyboard requests (1 show, 2 hide), typed text, and Android key codes (67 Delete, 66 Enter). */
 void husk_godot_set_keyboard_handler(void (*handler)(int action));
+/* A Unity game's text fields: action 1 show (text: the field's, flags: Unity's keyboard type in the low byte, 0x100 multi-line,
+ * 0x200 secure), 0 hide, 2 the game changed the text. husk_unity_input_text sends the whole field back; end 1 Done, 2 closed. */
+void husk_unity_set_keyboard_handler(void (*handler)(int action, const char *text, int flags));
+void husk_unity_input_text(const char *utf8, int end);
 void husk_godot_insert_text(const char *utf8);
 void husk_godot_key(int keycode, int down);
 

@@ -218,6 +218,17 @@ static void parse_sig(tl_jmeth *m)
 
 /* ------------------------------------------------- the implemented classes */
 
+int tl_jni_sig_nargs(const char *sig)
+{
+    int n = 0;
+    if (!sig || *sig != '(') return 0;
+    for (const char *p = sig + 1; *p && *p != ')'; p++, n++) {
+        while (*p == '[') p++;
+        if (*p == 'L') { while (*p && *p != ';') p++; }
+    }
+    return n;
+}
+
 void tl_jni_register_hle(const tl_jhle *table)
 {
     if (g_nhle < 32) g_hle[g_nhle++] = table;
@@ -440,7 +451,7 @@ static jvalue invoke(jobj *self, tl_jmeth *m, bool nonvirtual, const jvalue *arg
         if (m->retk == 'L' && r.l && ((jobj *)r.l)->kind != TL_K_CLASS) tl_jni_ref(r.l);
         return r;
     }
-    tl_jcall c = { .self = self, .cls = m->cls, .args = args };
+    tl_jcall c = { .self = self, .cls = m->cls, .args = args, .sig = m->sig };
     c.ret.j = 0;
     tl_jhle_fn fn = m->fn;
     if (!nonvirtual && self && self->cls && self->cls != m->cls) {

@@ -56,7 +56,11 @@ typedef struct tl_jcall {
     tl_jclass *cls;                     /* the class the method was found on */
     const jvalue *args;
     jvalue ret;                         /* written by the method */
+    const char *sig;                    /* the method's signature (an entry registered without one can read it here) */
 } tl_jcall;
+
+/* How many arguments a JNI method signature takes. */
+int tl_jni_sig_nargs(const char *sig);
 
 typedef void (*tl_jhle_fn)(tl_jcall *c);
 

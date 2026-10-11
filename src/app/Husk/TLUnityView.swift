@@ -99,6 +99,10 @@ final class TLUnityUIView: UIView, UIKeyInput {
         stats.isUserInteractionEnabled = false
         stats.text = " "
         if engine == .unity { addSubview(stats) }
+        if engine == .unity {
+            TLUnityUIView.cocosView = self
+            TLUnityUIView.installUnityKeyboardHandler()
+        }
         if engine == .cocos {
             TLUnityUIView.cocosView = self
             TLUnityUIView.installKeyboardHandler()
@@ -343,7 +347,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
 
     /// A game asks for the keyboard when its text field is tapped. The keyboard belongs to this view; what it types goes
     /// to the game, and a strip above the keyboard shows the text, because in landscape the keyboard covers the game's field.
-    override var canBecomeFirstResponder: Bool { engine == .cocos || engine == .sdl || engine == .minecraft || engine == .flutter || engine == .java || engine == .godot }
+    override var canBecomeFirstResponder: Bool { engine == .cocos || engine == .sdl || engine == .minecraft || engine == .flutter || engine == .java || engine == .godot || engine == .unity }
     var hasText: Bool { true }
     var autocorrectionType: UITextAutocorrectionType = .no
     var autocapitalizationType: UITextAutocapitalizationType = .none
@@ -380,7 +384,15 @@ final class TLUnityUIView: UIView, UIKeyInput {
         bar.addSubview(done)
         return bar
     }()
-    override var inputAccessoryView: UIView? { engine == .cocos || engine == .sdl || engine == .minecraft || engine == .godot ? keyboardBar : nil }
+    override var inputAccessoryView: UIView? { engine == .cocos || engine == .sdl || engine == .minecraft || engine == .godot || engine == .unity ? keyboardBar : nil }
+
+    /// A Unity text field is open: whether it takes several lines (Return is a new line then, Done ends it).
+    private var unityField = false, unityMultiline = false
+    override func resignFirstResponder() -> Bool {
+        // The keyboard closed by the player (the keyboard's own hide key, a tap elsewhere): the field keeps what was typed.
+        if engine == .unity, unityField { unityField = false; husk_unity_input_text(typed, 1) }
+        return super.resignFirstResponder()
+    }
 
     func insertText(_ text: String) {
         if engine == .java {
@@ -391,6 +403,13 @@ final class TLUnityUIView: UIView, UIKeyInput {
         if engine == .flutter {
             // Flutter's field draws the text itself: no strip over the keyboard, and Return is the field's action.
             if text == "\n", !husk_flutter_text_multiline() { husk_flutter_text_action() } else { husk_flutter_insert_text(text) }
+            return
+        }
+        if engine == .unity {
+            if text == "\n", !unityMultiline { finishTyping(); return }
+            typed += text
+            typedLabel.text = typed
+            husk_unity_input_text(typed, 0)
             return
         }
         if text == "\n" { finishTyping(); return }
@@ -405,6 +424,7 @@ final class TLUnityUIView: UIView, UIKeyInput {
         if engine == .flutter { husk_flutter_delete_backward(); return }
         if !typed.isEmpty { typed.removeLast() }
         typedLabel.text = typed
+        if engine == .unity { husk_unity_input_text(typed, 0); return }
         if engine == .sdl { husk_sdl_key(67, 1); husk_sdl_key(67, 0) }   // KEYCODE_DEL
         else if engine == .godot { husk_godot_key(67, 1); husk_godot_key(67, 0) }
         else if engine == .minecraft { husk_ga_delete_backward() }
@@ -415,6 +435,12 @@ final class TLUnityUIView: UIView, UIKeyInput {
 
     /// Return, or the Done button: what Android's "done" action does -- the game gets a newline, and the keyboard goes.
     private func finishTyping() {
+        if engine == .unity {
+            unityField = false
+            husk_unity_input_text(typed, 1)
+            resignFirstResponder()
+            return
+        }
         if engine == .sdl { husk_sdl_key(66, 1); husk_sdl_key(66, 0) }   // KEYCODE_ENTER
         else if engine == .godot { husk_godot_key(66, 1); husk_godot_key(66, 0) }
         else if engine == .minecraft { husk_ga_editor_action() }        // the field's own action: send the chat, name the world
@@ -551,6 +577,40 @@ final class TLUnityUIView: UIView, UIKeyInput {
             DispatchQueue.main.async {
                 guard let view = TLUnityUIView.cocosView, view.engine == .godot else { return }
                 if action == 1 { view.setTyped(""); view.becomeFirstResponder() } else { view.resignFirstResponder() }
+            }
+        }
+    }
+
+    /// A Unity game's text field (TouchScreenKeyboard, InputField): 1 opens the keyboard on the field's text, 0 closes it, 2 is the game
+    /// setting the text. Unity's keyboard types: 2 numbers and punctuation, 3 URL, 4 number pad, 5 phone, 7 e-mail, 10 decimal.
+    static func installUnityKeyboardHandler() {
+        husk_unity_set_keyboard_handler { action, text, flags in
+            let value = text.map { String(cString: $0) } ?? ""
+            DispatchQueue.main.async {
+                guard let view = TLUnityUIView.cocosView, view.engine == .unity else { return }
+                switch action {
+                case 1:
+                    switch flags & 0xff {
+                    case 2: view.keyboardType = .numbersAndPunctuation
+                    case 3: view.keyboardType = .URL
+                    case 4: view.keyboardType = .numberPad
+                    case 5: view.keyboardType = .phonePad
+                    case 7: view.keyboardType = .emailAddress
+                    case 10: view.keyboardType = .decimalPad
+                    default: view.keyboardType = .default
+                    }
+                    view.isSecureTextEntry = flags & 0x200 != 0
+                    view.unityMultiline = flags & 0x100 != 0
+                    view.returnKeyType = view.unityMultiline ? .default : .done
+                    view.setTyped(value)
+                    view.unityField = true
+                    if view.isFirstResponder { view.reloadInputViews() } else { view.becomeFirstResponder() }
+                case 2:
+                    view.setTyped(value)
+                default:
+                    view.unityField = false
+                    view.resignFirstResponder()
+                }
             }
         }
     }

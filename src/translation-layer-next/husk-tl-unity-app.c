@@ -569,6 +569,8 @@ void husk_native_set_system_files(const char *cacerts_dir, const char *fonts_roo
 void husk_ue4_set_vulkan(const char *dylib) { snprintf(A.vulkan, sizeof(A.vulkan), "%s", dylib ? dylib : ""); }
 void husk_unity_set_renderer(int renderer) { g_unity_renderer = renderer; }
 void husk_godot_set_keyboard_handler(void (*handler)(int action)) { tl_godot_set_keyboard_handler(handler); }
+void husk_unity_set_keyboard_handler(void (*handler)(int action, const char *text, int flags)) { tl_unity_set_keyboard_handler(handler); }
+void husk_unity_input_text(const char *utf8, int end) { if (atomic_load(&A.state) == HUSK_UNITY_RUNNING && A.engine == ENGINE_UNITY) tl_unity_input_text(utf8, end); }
 void husk_godot_insert_text(const char *utf8) { if (atomic_load(&A.state) == HUSK_UNITY_RUNNING && A.engine == ENGINE_GODOT) tl_godot_text(utf8); }
 void husk_godot_key(int keycode, int down) { if (atomic_load(&A.state) == HUSK_UNITY_RUNNING && A.engine == ENGINE_GODOT) tl_godot_key(keycode, down != 0); }
 void tl_set_shared_storage(const char *dir);
