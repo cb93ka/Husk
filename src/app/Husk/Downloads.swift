@@ -116,7 +116,7 @@ final class Downloads: ObservableObject {
         problem = nil
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard var url = URL(string: text.contains("://") ? text : "http://" + text), url.scheme?.hasPrefix("http") == true else {
-            problem = "That is not a web address."
+            problem = L("That is not a web address.")
             return
         }
         HuskLog.log("downloads", "adding \(url.absoluteString)")
@@ -127,7 +127,7 @@ final class Downloads: ObservableObject {
                 let path = f.path.split(separator: "/").map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }.joined(separator: "/")
                 return File(path: f.path, url: URL(string: "f/" + path, relativeTo: url)!.absoluteString, size: f.size)
             }
-            guard !files.isEmpty else { problem = "That folder is empty."; return }
+            guard !files.isEmpty else { problem = L("That folder is empty."); return }
             start(Job(title: manifest.name.isEmpty ? (url.host ?? "Folder") : manifest.name, source: url.absoluteString, kind: .folder, files: files))
             return
         }
@@ -158,7 +158,7 @@ final class Downloads: ObservableObject {
         var job = new
         let need = job.files.filter { !$0.done }.reduce(Int64(0)) { $0 + max(0, $1.size - Self.onDisk(job.kind, $1.path)) }
         if let free = Self.freeSpace(), need > free {
-            problem = "This needs \(Self.bytes(need)) more and the device has \(Self.bytes(free)) free."
+            problem = L("This needs \(Self.bytes(need)) more and the device has \(Self.bytes(free)) free.")
             return
         }
         Self.settle(&job)
@@ -787,7 +787,7 @@ enum ContinuedDownload {
             registered = pattern
         }
         let id = "\(bundle).downloads.\(UUID().uuidString.prefix(8))"
-        let request = BGContinuedProcessingTaskRequest(identifier: id, title: "Downloading \(title)", subtitle: "Starting…")
+        let request = BGContinuedProcessingTaskRequest(identifier: id, title: L("Downloading \(title)"), subtitle: L("Starting…"))
         request.strategy = .fail
         do {
             try BGTaskScheduler.shared.submit(request)
@@ -821,7 +821,7 @@ enum ContinuedDownload {
         if active.isEmpty {
             let failed = jobs.contains { $0.failed }
             t.progress.completedUnitCount = t.progress.totalUnitCount
-            t.updateTitle(failed ? "Download stopped" : "Download finished", subtitle: failed ? "Open Husk to retry" : (jobs.first?.title ?? ""))
+            t.updateTitle(failed ? L("Download stopped") : L("Download finished"), subtitle: failed ? L("Open Husk to retry") : (jobs.first?.title ?? ""))
             t.setTaskCompleted(success: !failed)
             task = nil
             HuskLog.log("downloads", "background task completed")
@@ -833,7 +833,7 @@ enum ContinuedDownload {
         t.progress.completedUnitCount = min(t.progress.totalUnitCount, received / 1_000_000)
         if Date().timeIntervalSince(lastSubtitle) > 2 {
             lastSubtitle = Date()
-            var sub = "\(Downloads.bytes(received)) of \(Downloads.bytes(total))"
+            var sub = L("\(Downloads.bytes(received)) of \(Downloads.bytes(total))")
             if speed > 1 { sub += " · \(Downloads.bytes(Int64(speed)))/s" }
             let files = active.reduce(0) { $0 + $1.files.count }
             if files > 1 { sub += " · \(active.reduce(0) { $0 + $1.filesDone })/\(files) files" }
@@ -842,7 +842,7 @@ enum ContinuedDownload {
                 let f = DateComponentsFormatter(); f.allowedUnits = left > 3600 ? [.hour, .minute] : [.minute, .second]; f.unitsStyle = .abbreviated
                 if let tl = f.string(from: left) { sub += " · \(tl) left" }
             }
-            t.updateTitle(active.count == 1 ? "Downloading \(active[0].title)" : "Downloading \(active.count) items", subtitle: sub)
+            t.updateTitle(active.count == 1 ? L("Downloading \(active[0].title)") : L("Downloading \(active.count) items"), subtitle: sub)
         }
         return true
     }

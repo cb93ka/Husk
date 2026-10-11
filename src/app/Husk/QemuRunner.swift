@@ -1783,7 +1783,7 @@ final class QemuRunner: ObservableObject {
                                 let r = QemuRunner.shared
                                 if percent > r.bootProgress { r.bootProgress = percent }
                                 r.setupMessage =
-                                    "\(r.bootProgress)%  ·  \(milestone)  ·  \(stamp) elapsed"
+                                    L("\(r.bootProgress)%  ·  \(milestone)  ·  \(stamp) elapsed")
                             }
                             break
                         }

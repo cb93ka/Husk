@@ -43,13 +43,13 @@ enum HuskBuiltInJIT {
 
     static var unavailableReason: String? {
 #if targetEnvironment(simulator)
-        return "Built-in JIT is available only on a physical device."
+        return L("Built-in JIT is available only on a physical device.")
 #else
         guard #available(iOS 26.0, *) else {
-            return "Built-in JIT needs iOS 26 or later. Use StikDebug instead."
+            return L("Built-in JIT needs iOS 26 or later. Use StikDebug instead.")
         }
         if getenv("LC_HOME_PATH") != nil {
-            return "Built-in JIT is unavailable inside LiveContainer. Use StikDebug instead."
+            return L("Built-in JIT is unavailable inside LiveContainer. Use StikDebug instead.")
         }
         return nil
 #endif
@@ -71,7 +71,7 @@ enum HuskBuiltInJIT {
             completion(.failure(HelperRequest.error(code, message)))
         }
         guard unavailableReason == nil else {
-            fail(1, unavailableReason ?? "Built-in JIT is unavailable.")
+            fail(1, unavailableReason ?? L("Built-in JIT is unavailable."))
             return
         }
         guard let identifier = helperIdentifier else {

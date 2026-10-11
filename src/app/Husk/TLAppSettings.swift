@@ -12,9 +12,9 @@ struct TLAppSettings: Codable, Equatable {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .auto: return "Automatic"
-            case .landscape: return "Landscape"
-            case .portrait: return "Portrait"
+            case .auto: return L("Automatic")
+            case .landscape: return L("Landscape")
+            case .portrait: return L("Portrait")
             }
         }
     }
@@ -25,10 +25,10 @@ struct TLAppSettings: Codable, Equatable {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .low: return "Low"
-            case .medium: return "Medium"
-            case .high: return "High"
-            case .native: return "Native"
+            case .low: return L("Low")
+            case .medium: return L("Medium")
+            case .high: return L("High")
+            case .native: return L("Native")
             }
         }
         var detail: String {
@@ -36,7 +36,7 @@ struct TLAppSettings: Codable, Equatable {
             case .low: return "1 pixel per point. Fastest."
             case .medium: return "1.5 pixels per point."
             case .high: return "2 pixels per point. The default."
-            case .native: return "Every pixel the screen has. Sharpest, and heaviest."
+            case .native: return L("Every pixel the screen has. Sharpest, and heaviest.")
             }
         }
         @MainActor var scale: CGFloat {
@@ -55,8 +55,8 @@ struct TLAppSettings: Codable, Equatable {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .auto: return "Automatic"
-            case .gles: return "OpenGL ES"
+            case .auto: return L("Automatic")
+            case .gles: return L("OpenGL ES")
             case .vulkan: return "Vulkan"
             }
         }
@@ -77,9 +77,9 @@ struct TLAppSettings: Codable, Equatable {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .auto: return "Automatic"
-            case .always: return "Always"
-            case .never: return "Never"
+            case .auto: return L("Automatic")
+            case .always: return L("Always")
+            case .never: return L("Never")
             }
         }
     }
@@ -91,9 +91,9 @@ struct TLAppSettings: Codable, Equatable {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .auto: return "Default"
-            case .window: return "Window"
-            case .fullScreen: return "Full Screen"
+            case .auto: return L("Default")
+            case .window: return L("Window")
+            case .fullScreen: return L("Full Screen")
             }
         }
     }
@@ -191,7 +191,7 @@ struct TLAppSettingsView: View {
             Section {
                 HStack(spacing: 14) {
                     AppIcon(path: app.iconPath, size: 52)
-                    TextField("Name", text: $name)
+                    TextField(LocalizedStringKey(L("Name")), text: $name)
                         .focused($nameFocused)
                         .submitLabel(.done)
                         .onSubmit { rename() }
@@ -199,109 +199,102 @@ struct TLAppSettingsView: View {
                 }
                 .padding(.vertical, 2)
             } footer: {
-                Text("What the game is called in Husk. The game itself is not changed.")
+                Text(LocalizedStringKey(L("What the game is called in Husk. The game itself is not changed.")))
             }
 
             Section {
-                Picker("Orientation", selection: $settings.orientation) {
+                Picker(LocalizedStringKey(L("Orientation")), selection: $settings.orientation) {
                     ForEach(TLAppSettings.Orientation.allCases) { Text($0.title).tag($0) }
                 }
-                Picker("Resolution", selection: $settings.resolution) {
+                Picker(LocalizedStringKey(L("Resolution")), selection: $settings.resolution) {
                     ForEach(TLAppSettings.Resolution.allCases) { Text($0.title).tag($0) }
                 }
                 if app.report?.nativeEngine == .unity || app.report?.nativeEngine == .godot {
-                    Picker("Graphics", selection: $settings.renderer) {
+                    Picker(LocalizedStringKey(L("Graphics")), selection: $settings.renderer) {
                         ForEach(TLAppSettings.Renderer.allCases) { Text($0.title).tag($0) }
                     }
                 }
-                Toggle("Performance readout", isOn: $settings.showStats)
-                Toggle("Keep the screen on", isOn: $settings.keepAwake)
+                Toggle(LocalizedStringKey(L("Performance readout")), isOn: $settings.showStats)
+                Toggle(LocalizedStringKey(L("Keep the screen on")), isOn: $settings.keepAwake)
             } header: {
-                Text("Display")
+                Text(LocalizedStringKey(L("Display")))
             } footer: {
-                Text("\(settings.resolution.detail) \(app.report?.nativeEngine == .unity ? "Graphics applies to Unity 6 games: Automatic and Vulkan draw with Vulkan, which lights characters that OpenGL ES leaves black. " : app.report?.nativeEngine == .godot ? "Graphics applies to Godot 4 games made for Vulkan: Automatic and Vulkan draw with it; OpenGL ES uses Godot's Compatibility renderer. " : "")Orientation and resolution apply the next time the game starts, and a game already "
-                   + "running in this session needs Husk closed and opened again.")
+                Text(LocalizedStringKey(L("\(settings.resolution.detail) \(app.report?.nativeEngine == .unity ? L("Graphics applies to Unity 6 games: Automatic and Vulkan draw with Vulkan, which lights characters that OpenGL ES leaves black. ") : app.report?.nativeEngine == .godot ? L("Graphics applies to Godot 4 games made for Vulkan: Automatic and Vulkan draw with it; OpenGL ES uses Godot's Compatibility renderer. ") : "")Orientation and resolution apply the next time the game starts, and a game already running in this session needs Husk closed and opened again.")))
             }
 
             Section {
-                Picker("Open In", selection: $settings.window) {
+                Picker(LocalizedStringKey(L("Open In")), selection: $settings.window) {
                     ForEach(TLAppSettings.WindowMode.allCases) { m in
-                        Text(m == .auto ? "Default (\(AppWindows.defaultWindowed ? "Window" : "Full Screen"))" : m.title).tag(m)
+                        Text(m == .auto ? L("Default (\(AppWindows.defaultWindowed ? "Window" : "Full Screen"))") : m.title).tag(m)
                     }
                 }
             } header: {
-                Text("Multitasking")
+                Text(LocalizedStringKey(L("Multitasking")))
             } footer: {
-                Text("In a window, \(app.label) runs over Husk: move it by its title bar, resize it from the corner, and minimise it to "
-                   + "the dock at the edge of the screen while you use the rest of Husk.")
+                Text(LocalizedStringKey(L("In a window, \(app.label) runs over Husk: move it by its title bar, resize it from the corner, and minimise it to the dock at the edge of the screen while you use the rest of Husk.")))
             }
 
             Section {
-                Toggle("Hide the interface", isOn: $settings.cleanView)
+                Toggle(LocalizedStringKey(L("Hide the interface")), isOn: $settings.cleanView)
             } header: {
-                Text("Screenshots")
+                Text(LocalizedStringKey(L("Screenshots")))
             } footer: {
-                Text("The game starts with nothing over it: no bar, no controller, no readout. Tap with three fingers at once to bring "
-                   + "the bar back, and again to hide it. The Hide button in the bar does the same while playing.")
+                Text(LocalizedStringKey(L("The game starts with nothing over it: no bar, no controller, no readout. Tap with three fingers at once to bring the bar back, and again to hide it. The Hide button in the bar does the same while playing.")))
             }
 
             if app.packageName == GeodeSupport.gamePackage {
                 Section {
-                    Toggle("Geode", isOn: $settings.geode)
+                    Toggle(LocalizedStringKey(L("Geode")), isOn: $settings.geode)
                     if settings.geode { geodeStatus }
                 } header: {
-                    Text("Mods")
+                    Text(LocalizedStringKey(L("Mods")))
                 } footer: {
-                    Text("Geode is the mod loader for Geometry Dash. With it on, Husk downloads Geode for this version of the "
-                       + "game, and mods are found and installed in the game itself, from Geode's button on the main menu. "
-                       + "Applies the next time the game starts.")
+                    Text(LocalizedStringKey(L("Geode is the mod loader for Geometry Dash. With it on, Husk downloads Geode for this version of the game, and mods are found and installed in the game itself, from Geode's button on the main menu. Applies the next time the game starts.")))
                 }
             }
 
             Section {
-                Picker("On-screen controller", selection: $settings.pad) {
+                Picker(LocalizedStringKey(L("On-screen controller")), selection: $settings.pad) {
                     ForEach(TLAppSettings.PadMode.allCases) { Text($0.title).tag($0) }
                 }
                 if settings.pad != .never {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Opacity")
+                        Text(LocalizedStringKey(L("Opacity")))
                         Slider(value: $settings.padOpacity, in: 0.3...1)
                     }
-                    Toggle("Vibrate on a press", isOn: $settings.haptics)
+                    Toggle(LocalizedStringKey(L("Vibrate on a press")), isOn: $settings.haptics)
                 }
             } header: {
-                Text("Controller")
+                Text(LocalizedStringKey(L("Controller")))
             } footer: {
-                Text("Automatic offers the controller for games that cannot be played without one (Unreal Engine games), when no real "
-                   + "controller is connected. Always offers it for any game that understands one. A paired controller is always used.")
+                Text(LocalizedStringKey(L("Automatic offers the controller for games that cannot be played without one (Unreal Engine games), when no real controller is connected. Always offers it for any game that understands one. A paired controller is always used.")))
             }
 
             Section {
                 Button { AppClip.generate(for: app) } label: {
-                    Label("Generate App Clip", systemImage: "apps.iphone.badge.plus")
+                    Label(LocalizedStringKey(L("Generate App Clip")), systemImage: "apps.iphone.badge.plus")
                 }
             } header: {
-                Text("Home Screen")
+                Text(LocalizedStringKey(L("Home Screen")))
             } footer: {
-                Text("Puts \(app.label) on your Home Screen with its own icon. Tapping it opens Husk straight into the game. Husk "
-                   + "downloads a profile: open Settings, tap Profile Downloaded, then Install.")
+                Text(LocalizedStringKey(L("Puts \(app.label) on your Home Screen with its own icon. Tapping it opens Husk straight into the game. Husk downloads a profile: open Settings, tap Profile Downloaded, then Install.")))
             }
 
             Section {
-                DetailRow(label: "Saved by the game", value: dataSize, mono: false)
+                DetailRow(label: L("Saved by the game"), value: dataSize, mono: false)
                 Button(role: .destructive) { confirmReset = true } label: {
-                    Label("Reset Game Data", systemImage: "arrow.counterclockwise")
+                    Label(LocalizedStringKey(L("Reset Game Data")), systemImage: "arrow.counterclockwise")
                 }
                 .disabled(inUse || dataDirs.isEmpty)
             } header: {
-                Text("Data")
+                Text(LocalizedStringKey(L("Data")))
             } footer: {
-                Text(inUse ? "The game is loaded in this session. Close Husk completely and open it again to reset its data."
-                           : "Deletes what the game saved and downloaded here: saves, settings and caches. The game itself stays.")
+                Text(inUse ? L("The game is loaded in this session. Close Husk completely and open it again to reset its data.")
+                           : L("Deletes what the game saved and downloaded here: saves, settings and caches. The game itself stays."))
             }
         }
         .huskForm()
-        .navigationTitle("Settings")
+        .navigationTitle(LocalizedStringKey(L("Settings")))
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: settings) { $0.save(app.id) }
         .onChange(of: settings.geode) { on in
@@ -310,15 +303,15 @@ struct TLAppSettingsView: View {
         .onChange(of: nameFocused) { focused in if !focused { rename() } }
         .onDisappear { rename() }
         .task { dataSize = await Self.measure(dataDirs) }
-        .confirmationDialog("Reset the data of \(app.label)?", isPresented: $confirmReset, titleVisibility: .visible) {
-            Button("Reset Game Data", role: .destructive) {
+        .confirmationDialog(LocalizedStringKey(L("Reset the data of \(app.label)?")), isPresented: $confirmReset, titleVisibility: .visible) {
+            Button(LocalizedStringKey(L("Reset Game Data")), role: .destructive) {
                 for dir in dataDirs { try? FileManager.default.removeItem(at: dir) }
                 HuskLog.log("tl", "reset the data of \(app.label)")
                 Task { dataSize = await Self.measure(dataDirs) }
             }
-            Button("Cancel", role: .cancel) { }
+            Button(LocalizedStringKey(L("Cancel")), role: .cancel) { }
         } message: {
-            Text("Saves, settings and caches the game made here are deleted.")
+            Text(LocalizedStringKey(L("Saves, settings and caches the game made here are deleted.")))
         }
     }
 
@@ -326,15 +319,15 @@ struct TLAppSettingsView: View {
     private var geodeStatus: some View {
         switch geode.current(app) {
         case .idle:
-            Button("Download Geode") { Task { await geode.prepare(app) } }
+            Button(LocalizedStringKey(L("Download Geode"))) { Task { await geode.prepare(app) } }
         case .working(let what):
-            HStack(spacing: 10) { ProgressView(); Text(what).foregroundStyle(.secondary) }
+            HStack(spacing: 10) { ProgressView(); Text(Lv(what)).foregroundStyle(.secondary) }
         case .ready(let version):
-            LabeledContent("Geode", value: "v\(version), ready")
+            LabeledContent(LocalizedStringKey(L("Geode")), value: L("v\(version), ready"))
         case .failed(let why):
             VStack(alignment: .leading, spacing: 6) {
-                Text(why).font(.footnote).foregroundStyle(.orange)
-                Button("Try Again") { Task { await geode.prepare(app) } }
+                Text(Lv(why)).font(.footnote).foregroundStyle(.orange)
+                Button(LocalizedStringKey(L("Try Again"))) { Task { await geode.prepare(app) } }
             }
         }
     }

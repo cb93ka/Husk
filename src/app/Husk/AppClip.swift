@@ -59,8 +59,8 @@ enum AppClip {
             "PayloadVersion": 1,
             "PayloadIdentifier": "app.husk.clip.\(safe(app.id))",
             "PayloadUUID": outer,
-            "PayloadDisplayName": "\(app.label) (Husk)",
-            "PayloadDescription": "Puts \(app.label) on your Home Screen. It opens in Husk.",
+            "PayloadDisplayName": L("\(app.label) (Husk)"),
+            "PayloadDescription": L("Puts \(app.label) on your Home Screen. It opens in Husk."),
             "PayloadOrganization": "Husk",
             "PayloadRemovalDisallowed": false,
             "PayloadContent": [payload],
@@ -150,7 +150,7 @@ final class ProfileServer: NSObject, UIAdaptivePresentationControllerDelegate, S
         c.start(queue: .global(qos: .userInitiated))
         c.receive(minimumIncompleteLength: 1, maximumLength: 16384) { [weak self] _, _, _, _ in
             guard let self else { c.cancel(); return }
-            var head = "HTTP/1.1 200 OK\r\n"
+            var head = L("HTTP/1.1 200 OK\r\n")
             head += "Content-Type: application/x-apple-aspen-config\r\n"
             head += "Content-Disposition: attachment; filename=\"\(self.name)\"\r\n"
             head += "Content-Length: \(self.body.count)\r\n"

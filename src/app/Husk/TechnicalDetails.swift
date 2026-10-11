@@ -12,8 +12,8 @@ extension TLReport {
     /// What runs it, in words.
     var runnerName: String {
         if runsOnNativeRuntime { return nativeEngineName }
-        if let web = webKind { return "\(web.name) (web app)" }
-        return canRun ? "Java (Husk's interpreter)" : "None"
+        if let web = webKind { return L("\(web.name) (web app)") }
+        return canRun ? L("Java (Husk's interpreter)") : "None"
     }
 }
 
@@ -53,21 +53,21 @@ struct TLTechnicalView: View {
 
     var body: some View {
         List {
-            Section("Runtime") {
-                row("Runs With", report?.runnerName ?? "Not scanned")
+            Section(LocalizedStringKey(L("Runtime"))) {
+                row("Runs With", report?.runnerName ?? L("Not scanned"))
                 row("Package", app.packageName ?? "—", mono: true)
-                row("Architectures", report.map { $0.abis.isEmpty ? "None (Java only)" : $0.abis.joined(separator: ", ") } ?? "—")
+                row("Architectures", report.map { $0.abis.isEmpty ? L("None (Java only)") : $0.abis.joined(separator: ", ") } ?? "—")
                 if let summary = report?.displaySummary {
-                    Text(summary).font(.footnote).foregroundStyle(.secondary)
+                    Text(Lv(summary)).font(.footnote).foregroundStyle(.secondary)
                 }
             }
 
-            Section("Package") {
+            Section(LocalizedStringKey(L("Package"))) {
                 ForEach(app.apks, id: \.self) { apk in
                     row((apk as NSString).lastPathComponent, size(of: apk), mono: true)
                 }
                 if let r = report {
-                    row("Java Code", r.dexCount == 0 ? "None" : "\(r.dexCount) DEX file\(r.dexCount == 1 ? "" : "s"), \(bytes(r.dexBytes))")
+                    row("Java Code", r.dexCount == 0 ? "None" : L("\(r.dexCount) DEX file\(r.dexCount == 1 ? "" : "s"), \(bytes(r.dexBytes))"))
                     row("Android Libraries Used", "\(r.systemLibraries.count)")
                 }
                 row("Saved Data", dataSize)
@@ -78,7 +78,7 @@ struct TLTechnicalView: View {
                     ForEach(arm64) { lib in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
-                                Text(lib.name).font(.system(.subheadline, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                                Text(Lv(lib.name)).font(.system(.subheadline, design: .monospaced)).lineLimit(1).truncationMode(.middle)
                                 Spacer(minLength: 8)
                                 Text(bytes(lib.bytes)).font(.caption).foregroundStyle(.secondary)
                             }
@@ -87,35 +87,35 @@ struct TLTechnicalView: View {
                         .padding(.vertical, 2)
                     }
                 } header: {
-                    Text("Native Libraries (\(arm64.count))")
+                    Text(LocalizedStringKey(L("Native Libraries (\(arm64.count))")))
                 } footer: {
-                    Text("How each 64-bit library maps onto the iPhone: its relocations, the instructions Husk rewrites, and anything the loader works around.")
+                    Text(LocalizedStringKey(L("How each 64-bit library maps onto the iPhone: its relocations, the instructions Husk rewrites, and anything the loader works around.")))
                 }
             }
 
             Section {
                 if let log, !log.isEmpty {
                     ScrollView(.horizontal) {
-                        Text(log)
+                        Text(Lv(log))
                             .font(.system(size: 10, design: .monospaced))
                             .textSelection(.enabled)
                             .fixedSize(horizontal: true, vertical: false)
                             .padding(.vertical, 4)
                     }
                     .frame(maxHeight: 320)
-                    Button { sharing = true } label: { Label("Share Log", systemImage: "square.and.arrow.up") }
+                    Button { sharing = true } label: { Label(LocalizedStringKey(L("Share Log")), systemImage: "square.and.arrow.up") }
                 } else {
-                    Text(log == nil ? "Reading…" : "No log yet. It is written the first time the game runs.")
+                    Text(log == nil ? L("Reading…") : L("No log yet. It is written the first time the game runs."))
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             } header: {
-                Text("Last Run")
+                Text(LocalizedStringKey(L("Last Run")))
             } footer: {
-                Text("The end of the log from the last time the game started. Share it when reporting a problem.")
+                Text(LocalizedStringKey(L("The end of the log from the last time the game started. Share it when reporting a problem.")))
             }
         }
         .listStyle(.insetGrouped)
-        .navigationTitle("Technical Details")
+        .navigationTitle(LocalizedStringKey(L("Technical Details")))
         .navigationBarTitleDisplayMode(.inline)
         .task {
             let url = logURL, dir = app.dataDirectory
@@ -132,19 +132,19 @@ struct TLTechnicalView: View {
                 return (text, total)
             }.value
             log = text
-            dataSize = total == 0 ? "Nothing yet" : bytes(total)
+            dataSize = total == 0 ? L("Nothing yet") : bytes(total)
         }
         .sheet(isPresented: $sharing) { ShareSheet(items: [logURL]) }
     }
 
     private func row(_ label: String, _ value: String, mono: Bool = false) -> some View {
         LabeledContent {
-            Text(value)
+            Text(Lv(value))
                 .font(mono ? .system(.footnote, design: .monospaced) : .body)
                 .multilineTextAlignment(.trailing)
                 .textSelection(.enabled)
         } label: {
-            Text(label).lineLimit(2)
+            Text(Lv(label)).lineLimit(2)
         }
     }
 
@@ -156,7 +156,7 @@ struct TLTechnicalView: View {
         if let c = lib.conflictPages, c > 0 { parts.append("\(c) shared code/data pages") }
         if lib.tls == true { parts.append("thread-local storage") }
         if !lib.notes.isEmpty { parts.append(contentsOf: lib.notes) }
-        return parts.isEmpty ? (lib.status == "ok" ? "Loads as it is" : lib.status) : parts.joined(separator: " · ")
+        return parts.isEmpty ? (lib.status == "ok" ? L("Loads as it is") : lib.status) : parts.joined(separator: " · ")
     }
 
     private func size(of path: String) -> String {

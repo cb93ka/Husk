@@ -99,7 +99,7 @@ struct AppDetailView: View {
                 } label: {
                     HStack {
                         Spacer()
-                        Label(canOpen ? "Launch" : "Starting Android…",
+                        Label(canOpen ? "Launch" : L("Starting Android…"),
                               systemImage: canOpen ? "play.fill" : "hourglass")
                             .font(.headline)
                         Spacer()
@@ -110,25 +110,25 @@ struct AppDetailView: View {
                 .disabled(!canOpen)
                 .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
             } footer: {
-                if !host.isReady { Text("It opens as soon as Android answers.") }
+                if !host.isReady { Text(LocalizedStringKey(L("It opens as soon as Android answers."))) }
             }
 
             Section {
-                LabeledContent("Version", value: live.version ?? "—")
-                LabeledContent("Size", value: live.sizeBytes.map(Self.bytes) ?? "—")
-                LabeledContent("Last Used", value: live.lastUsed.map(Self.when) ?? "Never from Husk")
+                LabeledContent(LocalizedStringKey(L("Version")), value: live.version ?? "—")
+                LabeledContent(LocalizedStringKey(L("Size")), value: live.sizeBytes.map(Self.bytes) ?? "—")
+                LabeledContent(LocalizedStringKey(L("Last Used")), value: live.lastUsed.map(Self.when) ?? L("Never from Husk"))
             }
 
             Section {
                 Button { router.openFiles(at: "/sdcard/Android/data/\(app.name)") } label: {
-                    Label("Open in Files", systemImage: "folder")
+                    Label(LocalizedStringKey(L("Open in Files")), systemImage: "folder")
                 }
                 Button { appInfo() } label: {
-                    Label("App Info", systemImage: "info.circle")
+                    Label(LocalizedStringKey(L("App Info")), systemImage: "info.circle")
                 }
                 .disabled(!canOpen)
                 Button(role: .destructive) { confirmUninstall = true } label: {
-                    Label("Uninstall", systemImage: "trash")
+                    Label(LocalizedStringKey(L("Uninstall")), systemImage: "trash")
                 }
                 .disabled(!canOpen)
             }
@@ -137,16 +137,15 @@ struct AppDetailView: View {
         .navigationTitle(live.label)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .topBarTrailing) { menu } }
-        .confirmationDialog("Uninstall \(live.label)?", isPresented: $confirmUninstall,
+        .confirmationDialog(LocalizedStringKey(L("Uninstall \(live.label)?")), isPresented: $confirmUninstall,
                             titleVisibility: .visible) {
-            Button("Uninstall", role: .destructive) {
+            Button(LocalizedStringKey(L("Uninstall")), role: .destructive) {
                 host.uninstall(app.name)
                 dismiss()
             }
-            Button("Cancel", role: .cancel) { }
+            Button(LocalizedStringKey(L("Cancel")), role: .cancel) { }
         } message: {
-            Text("Its data goes with it. Save Android afterwards or the change is "
-               + "lost on the next launch.")
+            Text(LocalizedStringKey(L("Its data goes with it. Save Android afterwards or the change is lost on the next launch.")))
         }
     }
 
@@ -156,14 +155,14 @@ struct AppDetailView: View {
         Menu {
             Button {
                 UIPasteboard.general.string = app.name
-            } label: { Label("Copy Package Name", systemImage: "doc.on.doc") }
+            } label: { Label(LocalizedStringKey(L("Copy Package Name")), systemImage: "doc.on.doc") }
             Button { appInfo() } label: {
-                Label("Show in Android Settings", systemImage: "gearshape")
+                Label(LocalizedStringKey(L("Show in Android Settings")), systemImage: "gearshape")
             }
             .disabled(!canOpen)
             Divider()
             Button(role: .destructive) { confirmUninstall = true } label: {
-                Label("Uninstall", systemImage: "trash")
+                Label(LocalizedStringKey(L("Uninstall")), systemImage: "trash")
             }
             .disabled(!canOpen)
         } label: {
@@ -175,10 +174,10 @@ struct AppDetailView: View {
         HStack(alignment: .top, spacing: 16) {
             AppIcon(path: live.iconPath, size: 76)
             VStack(alignment: .leading, spacing: 6) {
-                Text(live.label)
+                Text(Lv(live.label))
                     .font(.title2.weight(.bold))
                     .lineLimit(2)
-                Text(live.name)
+                Text(Lv(live.name))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)

@@ -15,11 +15,11 @@ enum JITMethod: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .automatic: return "Automatic"
+        case .automatic: return L("Automatic")
         case .stikDebug: return "StikDebug"
         case .trollStore: return "TrollStore"
-        case .jailbreak: return "Jailbreak (Dopamine)"
-        case .builtIn: return "Built-in StikJIT"
+        case .jailbreak: return L("Jailbreak (Dopamine)")
+        case .builtIn: return L("Built-in StikJIT")
         }
     }
 }
@@ -104,9 +104,9 @@ final class JITCoordinator: ObservableObject {
         var message: String {
             switch self {
             case .vpn:
-                return "Husk couldn't reach this device. Connect LocalDevVPN, then try again."
+                return L("Husk couldn't reach this device. Connect LocalDevVPN, then try again.")
             case .pairing:
-                return "This device closed the connection, which usually means it no longer accepts "
+                return L("This device closed the connection, which usually means it no longer accepts ")
                      + "Husk's pairing. Pair again, and check that LocalDevVPN is connected."
             }
         }
@@ -145,10 +145,10 @@ final class JITCoordinator: ObservableObject {
 
     var automaticDescription: String {
         switch resolvedMethod {
-        case .stikDebug: return "StikDebug is installed, so Husk will open it."
-        case .trollStore: return "TrollStore is installed, so Husk will ask it to enable JIT."
-        case .jailbreak: return "This device is jailbroken, so JIT comes from the jailbreak's Allow JIT in Apps setting."
-        default: return "StikDebug, TrollStore and a jailbreak were not found, so Husk will use its built-in helper."
+        case .stikDebug: return L("StikDebug is installed, so Husk will open it.")
+        case .trollStore: return L("TrollStore is installed, so Husk will ask it to enable JIT.")
+        case .jailbreak: return L("This device is jailbroken, so JIT comes from the jailbreak's Allow JIT in Apps setting.")
+        default: return L("StikDebug, TrollStore and a jailbreak were not found, so Husk will use its built-in helper.")
         }
     }
 
@@ -188,19 +188,19 @@ final class JITCoordinator: ObservableObject {
             assertionFailure("Automatic must resolve to a concrete JIT method")
         case .stikDebug:
             if !JITBootstrap.requestAttach(), !JITBootstrap.requestTrollStoreAttach() {
-                error = "StikDebug is not installed. Install it, or set up Built-in StikJIT."
+                error = L("StikDebug is not installed. Install it, or set up Built-in StikJIT.")
                 showSetup = true
             }
         case .trollStore:
             if JITBootstrap.requestTrollStoreAttach() {
                 awaitTrollStore()
             } else {
-                error = "TrollStore could not be opened. Install Husk through TrollStore, or choose another method."
+                error = L("TrollStore could not be opened. Install Husk through TrollStore, or choose another method.")
                 showSetup = true
             }
         case .jailbreak:
             // Nothing to ask: a jailbreak marks an app as debugged as it opens, if it has been told to. Say what to turn on.
-            error = "Turn on Allow JIT in Apps in Dopamine's settings, then open Husk again."
+            error = L("Turn on Allow JIT in Apps in Dopamine's settings, then open Husk again.")
             showSetup = true
         case .builtIn:
             guard HuskBuiltInJIT.isAvailable, hasPairing else {
@@ -217,19 +217,19 @@ final class JITCoordinator: ObservableObject {
     /// it never comes -- TrollStore only answers enable-jit once its URL Scheme setting is on.
     private func awaitTrollStore() {
         busy = true
-        status = "Waiting for TrollStore to enable JIT…"
+        status = L("Waiting for TrollStore to enable JIT…")
         log("waiting for TrollStore's attach")
         _ = Self.waitForDebugger(timeout: 60) { [weak self] attached in
             guard let self else { return }
             busy = false
             if attached {
-                status = "JIT is on."
+                status = L("JIT is on.")
                 error = nil
                 attachGeneration += 1
                 log("TrollStore enabled JIT")
             } else {
                 status = nil
-                error = "TrollStore did not enable JIT. In TrollStore's Settings turn on URL Scheme, and make sure Husk was "
+                error = L("TrollStore did not enable JIT. In TrollStore's Settings turn on URL Scheme, and make sure Husk was ")
                       + "installed through TrollStore (or is signed with get-task-allow)."
                 log("TrollStore did not enable JIT within a minute")
                 showSetup = true
@@ -244,7 +244,7 @@ final class JITCoordinator: ObservableObject {
             refreshPairingStatus()
             method = .builtIn
             prepared = false
-            status = "Pairing file imported."
+            status = L("Pairing file imported.")
             error = nil
             log("pairing file imported")
         } catch {
@@ -258,7 +258,7 @@ final class JITCoordinator: ObservableObject {
         refreshPairingStatus()
         method = .builtIn
         prepared = false
-        status = "Paired on this device."
+        status = L("Paired on this device.")
         error = nil
     }
 
@@ -268,7 +268,7 @@ final class JITCoordinator: ObservableObject {
         busy = true
         error = nil
         connectionProblem = nil
-        status = "Checking LocalDevVPN and the Developer Disk Image…"
+        status = L("Checking LocalDevVPN and the Developer Disk Image…")
         HuskBuiltInJIT.send(.prepare(pairingData: pairing)) { [weak self] result in
             guard let self else { return }
             busy = false
@@ -290,14 +290,14 @@ final class JITCoordinator: ObservableObject {
     func enableBuiltIn() {
         guard let pairing = builtInPairing() else { return }
         guard let script = JITBootstrap.scriptBase64 else {
-            error = "Husk's JIT script is missing from this installation. Reinstall Husk."
+            error = L("Husk's JIT script is missing from this installation. Reinstall Husk.")
             return
         }
 
         busy = true
         error = nil
         connectionProblem = nil
-        status = "Starting Husk's JIT helper…"
+        status = L("Starting Husk's JIT helper…")
         log("enabling JIT with the built-in helper")
         var readiness: Timer?
         var finished = false
@@ -312,7 +312,7 @@ final class JITCoordinator: ObservableObject {
                 log("built-in JIT failed: \(failure)")
                 showSetup = true
             } else {
-                status = "JIT is on."
+                status = L("JIT is on.")
                 error = nil
                 attachGeneration += 1
                 log("built-in helper attached")
@@ -322,7 +322,7 @@ final class JITCoordinator: ObservableObject {
         HuskBuiltInJIT.send(
             .enable(targetPID: getpid(), pairingData: pairing, scriptBase64: script),
             started: { [weak self] in
-                self?.status = "Waiting for the helper to attach…"
+                self?.status = L("Waiting for the helper to attach…")
                 readiness = Self.waitForDebugger { attached in
                     finish(attached ? nil : "The helper did not attach within 90 seconds. "
                                           + "Check that LocalDevVPN is connected, then try again.")
@@ -346,7 +346,7 @@ final class JITCoordinator: ObservableObject {
     func resetDDI() {
         busy = true
         error = nil
-        status = "Resetting the Developer Disk Image cache…"
+        status = L("Resetting the Developer Disk Image cache…")
         HuskBuiltInJIT.send(.resetDDI) { [weak self] result in
             guard let self else { return }
             busy = false
@@ -368,7 +368,7 @@ final class JITCoordinator: ObservableObject {
             return nil
         }
         guard let pairing = try? JITPairingFileStore.data() else {
-            error = "Pair this device or import its pairing file first."
+            error = L("Pair this device or import its pairing file first.")
             return nil
         }
         return pairing
@@ -407,7 +407,7 @@ enum LocalDevVPN {
     static let connect = URL(string: "localdevvpn://enable?scheme=husk")!
 
     static var isInstalled: Bool { UIApplication.shared.canOpenURL(URL(string: "localdevvpn://")!) }
-    static var actionTitle: String { isInstalled ? "Connect LocalDevVPN" : "Get LocalDevVPN" }
+    static var actionTitle: String { isInstalled ? L("Connect LocalDevVPN") : L("Get LocalDevVPN") }
 
     @MainActor static func open() {
         let installed = isInstalled

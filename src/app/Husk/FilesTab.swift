@@ -18,13 +18,13 @@ struct FilesTab: View {
 
     var body: some View {
         NavigationStack(path: $router.files) {
-            DirectoryView(path: Self.root, title: "Files")
+            DirectoryView(path: Self.root, title: L("Files"))
                 .navigationDestination(for: String.self) { path in
                     DirectoryView(path: path,
                                   title: (path as NSString).lastPathComponent)
                 }
                 .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                    ToolbarItem(placement: .cancellationAction) { Button(LocalizedStringKey(L("Done"))) { dismiss() } }
                 }
         }
     }
@@ -54,7 +54,7 @@ struct DirectoryView: View {
                     ForEach(entries, id: \.id) { e in row(e) }
                 } footer: {
                     if path != FilesTab.root {
-                        Text(path).font(.footnote).lineLimit(1).truncationMode(.head)
+                        Text(Lv(path)).font(.footnote).lineLimit(1).truncationMode(.head)
                     }
                 }
             }
@@ -64,9 +64,9 @@ struct DirectoryView: View {
             if loading && entries.isEmpty {
                 ProgressView()
             } else if let failure {
-                EmptyState(title: "Cannot Read This Folder", message: failure, systemImage: "lock")
+                EmptyState(title: L("Cannot Read This Folder"), message: failure, systemImage: "lock")
             } else if entries.isEmpty {
-                EmptyState(title: "Empty", message: "Nothing is in this folder yet.",
+                EmptyState(title: L("Empty"), message: L("Nothing is in this folder yet."),
                            systemImage: "folder", actionTitle: "Import Files",
                            action: { showImportSheet = true })
             }
@@ -75,8 +75,8 @@ struct DirectoryView: View {
         .navigationBarTitleDisplayMode(path == FilesTab.root ? .large : .inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                Button { load() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-                Button { showImportSheet = true } label: { Label("Import", systemImage: "plus") }
+                Button { load() } label: { Label(LocalizedStringKey(L("Refresh")), systemImage: "arrow.clockwise") }
+                Button { showImportSheet = true } label: { Label(LocalizedStringKey(L("Import")), systemImage: "plus") }
             }
         }
         .sheet(isPresented: $showImportSheet) {
@@ -86,17 +86,17 @@ struct DirectoryView: View {
         .huskFilePicker(isPresented: $importing) { urls in
             host.sendFiles(urls, to: path)
         }
-        .confirmationDialog("Install \(installing?.name ?? "")?",
+        .confirmationDialog(LocalizedStringKey(L("Install \(installing?.name ?? "")?")),
                             isPresented: Binding(get: { installing != nil },
                                                  set: { if !$0 { installing = nil } }),
                             titleVisibility: .visible) {
-            Button("Install") {
+            Button(LocalizedStringKey(L("Install"))) {
                 if let apk = installing { host.installFromGuest(apk.path, name: apk.name) }
                 installing = nil
             }
-            Button("Cancel", role: .cancel) { installing = nil }
+            Button(LocalizedStringKey(L("Cancel")), role: .cancel) { installing = nil }
         } message: {
-            Text("Android installs it from where it already is — nothing is copied.")
+            Text(LocalizedStringKey(L("Android installs it from where it already is — nothing is copied.")))
         }
         .task(id: path) { load() }
         .refreshable { load() }
@@ -131,9 +131,9 @@ struct DirectoryView: View {
                 .foregroundStyle(tint)
                 .frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).lineLimit(1).truncationMode(.middle)
+                Text(Lv(title)).lineLimit(1).truncationMode(.middle)
                 if let subtitle {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(Lv(subtitle)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
         }
@@ -142,9 +142,9 @@ struct DirectoryView: View {
     private func storage(_ s: (free: Int64, total: Int64)) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Storage")
+                Text(LocalizedStringKey(L("Storage")))
                 Spacer()
-                Text("\(AppDetailView.bytes(s.total - s.free)) of \(AppDetailView.bytes(s.total))")
+                Text(LocalizedStringKey(L("\(AppDetailView.bytes(s.total - s.free)) of \(AppDetailView.bytes(s.total))")))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -220,9 +220,8 @@ struct ImportSheet: View {
                     Image(systemName: "doc.badge.plus")
                         .font(.system(size: 34, weight: .light))
                         .foregroundStyle(Color.accentColor)
-                    Text("Import Files").font(.headline)
-                    Text("They go to \((destination as NSString).lastPathComponent). "
-                       + "Unmodified APKs install from here too.")
+                    Text(LocalizedStringKey(L("Import Files"))).font(.headline)
+                    Text(LocalizedStringKey(L("They go to \((destination as NSString).lastPathComponent). Unmodified APKs install from here too.")))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -231,17 +230,17 @@ struct ImportSheet: View {
                 .padding(.vertical, 24)
                 .huskCard()
 
-                Button("Browse Files", action: onBrowse)
+                Button(LocalizedStringKey(L("Browse Files")), action: onBrowse)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                 Spacer(minLength: 0)
             }
             .padding(16)
             .background(Theme.backdrop)
-            .navigationTitle("Import")
+            .navigationTitle(LocalizedStringKey(L("Import")))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button(LocalizedStringKey(L("Done"))) { dismiss() } }
             }
         }
     }

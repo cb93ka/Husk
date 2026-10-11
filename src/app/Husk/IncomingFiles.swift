@@ -59,7 +59,7 @@ final class IncomingFiles: ObservableObject {
 
     /// Copy files to Husk's own folder, off the main thread -- a game can be gigabytes -- then hand back the copies.
     private func take(_ urls: [URL], then: @escaping @MainActor ([URL]) -> Void) {
-        preparing = urls.count == 1 ? "Preparing \(urls[0].lastPathComponent)…" : "Preparing \(urls.count) files…"
+        preparing = urls.count == 1 ? L("Preparing \(urls[0].lastPathComponent)…") : L("Preparing \(urls.count) files…")
         Task.detached(priority: .userInitiated) {
             var copies: [URL] = []
             for url in urls {
@@ -130,12 +130,12 @@ struct IncomingChooser: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Add to Husk").font(.title2.weight(.bold))
-                Text(title).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                Text(LocalizedStringKey(L("Add to Husk"))).font(.title2.weight(.bold))
+                Text(Lv(title)).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
             }
 
-            choice(icon: "bolt.fill", title: "Translation Layer",
-                   detail: "Runs the game directly on your iPhone, without starting Android. Best for games.") {
+            choice(icon: "bolt.fill", title: L("Translation Layer"),
+                   detail: L("Runs the game directly on your iPhone, without starting Android. Best for games.")) {
                 incoming.sendToTranslationLayer()
             }
             choice(icon: "apps.iphone", title: "Android",
@@ -143,7 +143,7 @@ struct IncomingChooser: View {
                 incoming.sendToAndroid()
             }
 
-            Button("Cancel", role: .cancel) { incoming.discard() }
+            Button(LocalizedStringKey(L("Cancel")), role: .cancel) { incoming.discard() }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 2)
         }
@@ -151,9 +151,9 @@ struct IncomingChooser: View {
     }
 
     private var androidDetail: String {
-        if host.isReady { return "Installs it into Android, where any app can run." }
-        if guest.state == .ready { return "Installs it into Android the next time Android starts." }
-        return "Installs it into Android once Android is downloaded and started."
+        if host.isReady { return L("Installs it into Android, where any app can run.") }
+        if guest.state == .ready { return L("Installs it into Android the next time Android starts.") }
+        return L("Installs it into Android once Android is downloaded and started.")
     }
 
     private func choice(icon: String, title: String, detail: String, action: @escaping () -> Void) -> some View {
@@ -165,8 +165,8 @@ struct IncomingChooser: View {
                     .frame(width: 44, height: 44)
                     .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.headline).foregroundStyle(.primary)
-                    Text(detail).font(.subheadline).foregroundStyle(.secondary)
+                    Text(Lv(title)).font(.headline).foregroundStyle(.primary)
+                    Text(Lv(detail)).font(.subheadline).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)

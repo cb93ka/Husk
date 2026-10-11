@@ -12,7 +12,7 @@ enum BundleUnpacker {
         case notAZip, unsupported(String)
         var errorDescription: String? {
             switch self {
-            case .notAZip: return "That file is not a bundle Husk can read."
+            case .notAZip: return L("That file is not a bundle Husk can read.")
             case .unsupported(let why): return why
             }
         }

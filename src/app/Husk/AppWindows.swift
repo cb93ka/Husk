@@ -164,8 +164,8 @@ private struct AppWindow: View {
             WebAppSurface(app: app)
         } else if let other = blockedBy {
             VStack(spacing: 6) {
-                Text("Another game is already loaded").font(.subheadline.weight(.semibold))
-                Text("\(other) was started in this session. Close Husk completely and open it again to run \(app.label).")
+                Text(LocalizedStringKey(L("Another game is already loaded"))).font(.subheadline.weight(.semibold))
+                Text(LocalizedStringKey(L("\(other) was started in this session. Close Husk completely and open it again to run \(app.label).")))
                     .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             .foregroundStyle(.white)
@@ -197,10 +197,10 @@ private struct AppWindow: View {
                     Image(systemName: "chevron.backward").font(.system(size: 13, weight: .semibold)).frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Back")
+                .accessibilityLabel(LocalizedStringKey(L("Back")))
             }
             ItemIcon(item: .game(app), size: 18)
-            Text(app.label).font(.footnote.weight(.semibold)).lineLimit(1)
+            Text(Lv(app.label)).font(.footnote.weight(.semibold)).lineLimit(1)
             Spacer(minLength: 6)
             // Balances the lights, so the name sits in the middle.
             Color.clear.frame(width: 3 * 22 + 2 * 8, height: 1)
@@ -258,7 +258,7 @@ private struct AppWindow: View {
                     }
                     .onEnded { _ in startFrame = nil }
             )
-            .accessibilityLabel("Resize")
+            .accessibilityLabel(LocalizedStringKey(L("Resize")))
     }
 }
 
@@ -297,11 +297,11 @@ private struct WindowDock: View {
                     }
             )
             .contextMenu {
-                Button { windows.restore() } label: { Label("Show", systemImage: "macwindow") }
-                Button(role: .destructive) { windows.close() } label: { Label("Close", systemImage: "xmark") }
+                Button { windows.restore() } label: { Label(LocalizedStringKey(L("Show")), systemImage: "macwindow") }
+                Button(role: .destructive) { windows.close() } label: { Label(LocalizedStringKey(L("Close")), systemImage: "xmark") }
             }
-            .accessibilityLabel("\(app.label), minimised")
-            .accessibilityHint("Shows the window again")
+            .accessibilityLabel(LocalizedStringKey(L("\(app.label), minimised")))
+            .accessibilityHint(LocalizedStringKey(L("Shows the window again")))
     }
 }
 

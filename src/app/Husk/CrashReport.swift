@@ -29,9 +29,9 @@ final class CrashReport: ObservableObject {
 
         var title: String {
             switch self {
-            case .signal: return "The game crashed"
-            case .startFailed: return "The game could not start"
-            case .unknown: return "Husk closed while the game was running"
+            case .signal: return L("The game crashed")
+            case .startFailed: return L("The game could not start")
+            case .unknown: return L("Husk closed while the game was running")
             }
         }
         var detail: String {
@@ -40,11 +40,11 @@ final class CrashReport: ObservableObject {
                 let name = [11: "SIGSEGV, a bad memory access", 6: "SIGABRT, the game or a library gave up",
                             4: "SIGILL, an instruction this device does not run", 8: "SIGFPE, an arithmetic error",
                             12: "SIGSYS, a system call iOS does not allow"][s] ?? "signal \(s)"
-                return "It stopped with \(name). The report has the full log of that run."
+                return L("It stopped with \(name). The report has the full log of that run.")
             case .startFailed:
-                return "The runtime could not start it. The report says which part was missing."
+                return L("The runtime could not start it. The report says which part was missing.")
             case .unknown:
-                return "Nothing was recorded, which usually means iOS ended Husk for using too much memory, or Husk was closed from the app switcher."
+                return L("Nothing was recorded, which usually means iOS ended Husk for using too much memory, or Husk was closed from the app switcher.")
             }
         }
     }
@@ -105,7 +105,7 @@ final class CrashReport: ObservableObject {
             cause = .startFailed
         }
         let time = (info["time"] as? Double).map { Date(timeIntervalSince1970: $0) }
-        pending = Report(game: info["label"] as? String ?? "A game", appID: info["id"] as? String ?? "",
+        pending = Report(game: info["label"] as? String ?? L("A game"), appID: info["id"] as? String ?? "",
                          cause: cause, when: time, excerpt: Array(Self.interesting(lines).suffix(14)))
         HuskLog.log("crash", "\(pending!.game) did not close normally last run: \(cause.title)")
         switch cause {
@@ -139,9 +139,9 @@ final class CrashReport: ObservableObject {
 
         """
         if let app = TranslationLayerStore.shared.apps.first(where: { $0.id == r.appID }) {
-            text += "Package  : \(app.packageName ?? "?")\n"
-            text += "APKs     : \(app.apks.map { ($0 as NSString).lastPathComponent }.joined(separator: ", "))\n"
-            text += "Engine   : \(app.report?.nativeEngine.map { "\($0)" } ?? "?")\n"
+            text += L("Package  : \(app.packageName ?? "?")\n")
+            text += L("APKs     : \(app.apks.map { ($0 as NSString).lastPathComponent }.joined(separator: ", "))\n")
+            text += L("Engine   : \(app.report?.nativeEngine.map { "\($0)" } ?? "?")\n")
         }
         text += "\n---- husk.log of that run ----\n"
         text += (try? String(contentsOf: previousLogURL, encoding: .utf8)) ?? "(not kept)\n"
@@ -168,15 +168,15 @@ struct CrashReportSheet: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 30)).foregroundStyle(.orange)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(report.cause.title).font(.title3.weight(.semibold))
-                            Text(report.game).foregroundStyle(.secondary)
+                            Text(Lv(report.cause.title)).font(.title3.weight(.semibold))
+                            Text(Lv(report.game)).foregroundStyle(.secondary)
                         }
                     }
-                    Text(report.cause.detail).font(.callout)
+                    Text(Lv(report.cause.detail)).font(.callout)
 
                     if !report.excerpt.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Last lines").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                            Text(LocalizedStringKey(L("Last lines"))).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
                             Text(report.excerpt.joined(separator: "\n"))
                                 .font(.system(size: 10.5, design: .monospaced))
                                 .textSelection(.enabled)
@@ -188,19 +188,19 @@ struct CrashReportSheet: View {
 
                     if let file {
                         ShareLink(item: file) {
-                            Label("Share Report", systemImage: "square.and.arrow.up")
+                            Label(LocalizedStringKey(L("Share Report")), systemImage: "square.and.arrow.up")
                                 .frame(maxWidth: .infinity).padding(.vertical, 6)
                         }
                         .buttonStyle(.borderedProminent)
                     }
-                    Text("The report holds the full log of that run and which device and build it was on. Nothing is sent anywhere unless you share it.")
+                    Text(LocalizedStringKey(L("The report holds the full log of that run and which device and build it was on. Nothing is sent anywhere unless you share it.")))
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 .padding(20)
             }
-            .navigationTitle("Crash Report")
+            .navigationTitle(LocalizedStringKey(L("Crash Report")))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button(LocalizedStringKey(L("Done"))) { dismiss() } } }
         }
         .task { file = CrashReport.writeReport(report) }
     }

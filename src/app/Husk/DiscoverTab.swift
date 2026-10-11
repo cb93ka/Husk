@@ -15,11 +15,11 @@ struct DiscoverView: View {
     var body: some View {
         Group {
             if manager.isLoading && manager.sources.isEmpty {
-                ProgressView("Fetching Repositories…")
+                ProgressView(LocalizedStringKey(L("Fetching Repositories…")))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if manager.sources.isEmpty {
-                EmptyState(title: "No Repositories",
-                           message: "Add a source to start discovering apps.",
+                EmptyState(title: L("No Repositories"),
+                           message: L("Add a source to start discovering apps."),
                            systemImage: "tray",
                            actionTitle: "Add Source",
                            action: { showingAddSource = true })
@@ -29,22 +29,22 @@ struct DiscoverView: View {
             }
         }
         .background(Theme.backdrop)
-        .navigationTitle("Discover")
+        .navigationTitle(LocalizedStringKey(L("Discover")))
         .navigationBarTitleDisplayMode(.large)
-        .searchable(text: $searchText, prompt: "Search \(totalAppCount) apps")
+        .searchable(text: $searchText, prompt: L("Search \(totalAppCount) apps"))
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button { Task { await manager.fetchSources() } } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                    Label(LocalizedStringKey(L("Refresh")), systemImage: "arrow.clockwise")
                 }
                 Menu {
                     Button { showingAddSource = true } label: {
-                        Label("Add Source", systemImage: "plus")
+                        Label(LocalizedStringKey(L("Add Source")), systemImage: "plus")
                     }
                     Button { showingSources = true } label: {
-                        Label("Manage Repositories", systemImage: "list.bullet")
+                        Label(LocalizedStringKey(L("Manage Repositories")), systemImage: "list.bullet")
                     }
-                } label: { Label("Repositories", systemImage: "ellipsis.circle") }
+                } label: { Label(LocalizedStringKey(L("Repositories")), systemImage: "ellipsis.circle") }
             }
         }
         .sheet(isPresented: $showingSources) { sourcesSheet }
@@ -75,12 +75,12 @@ struct DiscoverView: View {
                     ForEach(manager.fetchErrors.keys.sorted(), id: \.self) { url in
                         Label {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(url).font(.footnote).lineLimit(1)
+                                Text(Lv(url)).font(.footnote).lineLimit(1)
                                 Text(manager.fetchErrors[url] ?? "").font(.caption).foregroundStyle(.secondary)
                             }
                         } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
                     }
-                } header: { Text("Could Not Load") }
+                } header: { Text(LocalizedStringKey(L("Could Not Load"))) }
             }
         }
         .listStyle(.insetGrouped)
@@ -106,10 +106,10 @@ struct DiscoverView: View {
         return Section {
             ForEach(displayApps) { app in appRow(app) }
         } header: {
-            Text(source.name)
+            Text(Lv(source.name))
         } footer: {
             if debouncedSearchText.isEmpty && apps.count > 50 {
-                Text("Search to see \(apps.count - 50) more apps.")
+                Text(LocalizedStringKey(L("Search to see \(apps.count - 50) more apps.")))
             }
         }
     }
@@ -129,8 +129,8 @@ struct DiscoverView: View {
             .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(app.name).font(.body.weight(.medium)).lineLimit(1)
-                Text(app.localizedDescription)
+                Text(Lv(app.name)).font(.body.weight(.medium)).lineLimit(1)
+                Text(Lv(app.localizedDescription))
                     .font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
 
@@ -140,7 +140,7 @@ struct DiscoverView: View {
             let progress = manager.downloadProgress[app.bundleIdentifier]
 
             if isInstalled {
-                Button("Open") {
+                Button(LocalizedStringKey(L("Open"))) {
                     let intent = "am start -n \(app.bundleIdentifier)/\(app.bundleIdentifier).MainActivity"
                     _ = try? GuestBridge.shared.shell(intent, timeout: 5)
                 }
@@ -156,7 +156,7 @@ struct DiscoverView: View {
                 }
                 .frame(width: 28, height: 28)
             } else {
-                Button("Get") { manager.downloadAndInstall(app: app) }
+                Button(LocalizedStringKey(L("Get"))) { manager.downloadAndInstall(app: app) }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.capsule)
             }
@@ -174,12 +174,12 @@ struct DiscoverView: View {
                     TextField("https://f-droid.org/repo/index-v1.json", text: $newSourceURL)
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
                 } header: {
-                    Text("Source URL")
+                    Text(LocalizedStringKey(L("Source URL")))
                 } footer: {
-                    Text("Paste any F-Droid-compatible repository index URL.")
+                    Text(LocalizedStringKey(L("Paste any F-Droid-compatible repository index URL.")))
                 }
 
-                Section("Presets") {
+                Section(LocalizedStringKey(L("Presets"))) {
                     ForEach([
                         ("F-Droid", "https://f-droid.org/repo/index-v1.json"),
                         ("IzzyOnDroid", "https://apt.izzysoft.de/fdroid/repo/index-v1.json"),
@@ -188,8 +188,8 @@ struct DiscoverView: View {
                         Button { newSourceURL = url } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(name).foregroundStyle(.primary)
-                                    Text(url).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                    Text(Lv(name)).foregroundStyle(.primary)
+                                    Text(Lv(url)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                                 }
                                 Spacer()
                                 if newSourceURL == url {
@@ -200,14 +200,14 @@ struct DiscoverView: View {
                     }
                 }
             }
-            .navigationTitle("Add Source")
+            .navigationTitle(LocalizedStringKey(L("Add Source")))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { newSourceURL = ""; showingAddSource = false }
+                    Button(LocalizedStringKey(L("Cancel"))) { newSourceURL = ""; showingAddSource = false }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Add") {
+                    Button(LocalizedStringKey(L("Add"))) {
                         let url = newSourceURL
                         newSourceURL = ""
                         showingAddSource = false
@@ -230,21 +230,21 @@ struct DiscoverView: View {
                     ForEach(manager.sourceURLs, id: \.self) { url in
                         VStack(alignment: .leading, spacing: 2) {
                             if let source = manager.sources.first(where: { $0.identifier == url }) {
-                                Text(source.name).font(.body.weight(.medium))
-                                Text("\(source.apps.count) apps").font(.caption).foregroundStyle(.secondary)
+                                Text(Lv(source.name)).font(.body.weight(.medium))
+                                Text(LocalizedStringKey(L("\(source.apps.count) apps"))).font(.caption).foregroundStyle(.secondary)
                             }
-                            Text(url).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            Text(Lv(url)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         }
                         .padding(.vertical, 2)
                     }
                     .onDelete { manager.sourceURLs.remove(atOffsets: $0) }
-                } header: { Text("Active Repositories") }
+                } header: { Text(LocalizedStringKey(L("Active Repositories"))) }
             }
-            .navigationTitle("Repositories")
+            .navigationTitle(LocalizedStringKey(L("Repositories")))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { showingSources = false }
+                    Button(LocalizedStringKey(L("Done"))) { showingSources = false }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { showingSources = false; showingAddSource = true } label: {

@@ -31,6 +31,7 @@ struct ContentView: View {
     @ObservedObject private var incoming = IncomingFiles.shared
     @ObservedObject private var showcase = ShowcaseStore.shared
     @ObservedObject private var tlStore = TranslationLayerStore.shared
+    @ObservedObject private var language = LanguageVersion.shared
     @ObservedObject private var crash = CrashReport.shared
     @ObservedObject private var updates = AppUpdates.shared
     @State private var showWhatsNew = false
@@ -48,21 +49,22 @@ struct ContentView: View {
             // why it appears instantly rather than reloading.
             TabView(selection: $router.tab) {
                 HomeView()
-                    .tabItem { Label("Home", systemImage: "house.fill") }
+                    .tabItem { Label(LocalizedStringKey(L("Home")), systemImage: "house.fill") }
                     .tag(HuskTab.home)
 
                 LibraryScreen()
-                    .tabItem { Label("Library", systemImage: "square.grid.2x2.fill") }
+                    .tabItem { Label(LocalizedStringKey(L("Library")), systemImage: "square.grid.2x2.fill") }
                     .tag(HuskTab.library)
 
                 StoreView()
-                    .tabItem { Label("Store", systemImage: "cart.fill") }
+                    .tabItem { Label(LocalizedStringKey(L("Store")), systemImage: "cart.fill") }
                     .tag(HuskTab.store)
 
                 SettingsTab()
-                    .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                    .tabItem { Label(LocalizedStringKey(L("Settings")), systemImage: "gearshape.fill") }
                     .tag(HuskTab.settings)
             }
+            .id(language.value)      // drawn again in the new language when it changes
             .opacity(showGuestScreen && started && runner.isRunning ? 0 : 1)
 
             // Multitasking: an app in a window over everything else in Husk (AppWindows.swift).
@@ -135,28 +137,28 @@ struct ContentView: View {
             WhatsNewSheet { WhatsNew.markSeen(); showWhatsNew = false }
         }
         // A newer Husk is on GitHub.
-        .alert("Husk \(updates.available?.version ?? "") Is Available", isPresented: Binding(
+        .alert(LocalizedStringKey(L("Husk \(updates.available?.version ?? "") Is Available")), isPresented: Binding(
                 get: { updates.available != nil && !showOnboarding && !showWhatsNew && crash.pending == nil },
                 set: { if !$0 { updates.dismiss() } })) {
-            Button("View Release") {
+            Button(LocalizedStringKey(L("View Release"))) {
                 if let page = updates.available?.page { UIApplication.shared.open(page) }
                 updates.dismiss()
             }
-            Button("Not Now", role: .cancel) { updates.dismiss() }
+            Button(LocalizedStringKey(L("Not Now")), role: .cancel) { updates.dismiss() }
         } message: {
-            Text("You have \(AppUpdates.current). The new version's IPA is on its release page.")
+            Text(LocalizedStringKey(L("You have \(AppUpdates.current). The new version's IPA is on its release page.")))
         }
         .task { await updates.check() }
         // An APK just added: whether it will run, said at once rather than found out at the first start.
-        .alert(tlStore.justAdded.map { "\($0.label) Added" } ?? "", isPresented: Binding(
+        .alert(tlStore.justAdded.map { L("\($0.label) Added") } ?? "", isPresented: Binding(
             get: { tlStore.justAdded != nil }, set: { if !$0 { tlStore.justAdded = nil } })) {
-            Button("OK", role: .cancel) { tlStore.justAdded = nil }
+            Button(LocalizedStringKey(L("OK")), role: .cancel) { tlStore.justAdded = nil }
         } message: {
             if let app = tlStore.justAdded { let c = app.compatibility; Text("\(c.title)\n\n\(c.detail)") }
         }
-        .alert("Could Not Add the APK", isPresented: Binding(
+        .alert(LocalizedStringKey(L("Could Not Add the APK")), isPresented: Binding(
             get: { tlStore.lastError != nil }, set: { if !$0 { tlStore.lastError = nil } })) {
-            Button("OK", role: .cancel) { tlStore.lastError = nil }
+            Button(LocalizedStringKey(L("OK")), role: .cancel) { tlStore.lastError = nil }
         } message: {
             Text(tlStore.lastError ?? "")
         }
@@ -164,13 +166,13 @@ struct ContentView: View {
         .sheet(isPresented: $router.showDownloads) { DownloadsTab() }
         // Pictures for the apps here: read the index on launch and whenever the set of apps changes.
         .task(id: showcasePackages) { showcase.refresh(for: showcasePackages) }
-        .alert("Metadata Updated", isPresented: Binding(get: { showcase.shouldAsk && !showOnboarding },
+        .alert(LocalizedStringKey(L("Metadata Updated")), isPresented: Binding(get: { showcase.shouldAsk && !showOnboarding },
                                                          set: { if !$0 { showcase.asked() } })) {
-            Button("Download") { showcase.downloadUpdates() }
-            Button("Not Now", role: .cancel) { showcase.asked() }
+            Button(LocalizedStringKey(L("Download"))) { showcase.downloadUpdates() }
+            Button(LocalizedStringKey(L("Not Now")), role: .cancel) { showcase.asked() }
         } message: {
             let n = showcase.updates.count
-            Text("Metadata for \(n) of your app\(n == 1 ? "" : "s") has been updated. Would you like to download the updates?")
+            Text(LocalizedStringKey(L("Metadata for \(n) of your app\(n == 1 ? "" : "s") has been updated. Would you like to download the updates?")))
         }
         // An APK shared to Husk: where does it go?
         .sheet(isPresented: Binding(get: { !incoming.waiting.isEmpty },
@@ -198,10 +200,10 @@ struct ContentView: View {
         .alert(guest.update.title, isPresented: Binding(
                 get: { guest.update.isSomething },
                 set: { if !$0 { guest.dismissUpdate() } })) {
-            Button("Download") { guest.applyUpdate() }
-            Button("Not now", role: .cancel) { guest.dismissUpdate() }
+            Button(LocalizedStringKey(L("Download"))) { guest.applyUpdate() }
+            Button(LocalizedStringKey(L("Not now")), role: .cancel) { guest.dismissUpdate() }
         } message: {
-            Text(guest.update.detail)
+            Text(Lv(guest.update.detail))
         }
         .onAppear {
             crash.checkPreviousRun()
@@ -379,7 +381,7 @@ struct GuestScreenView: View {
                     ProgressView(value: Double(runner.bootProgress), total: 100)
                         .progressViewStyle(.linear)
                         .frame(width: 200)
-                    Text(runner.setupMessage ?? "Starting Android…")
+                    Text(runner.setupMessage ?? L("Starting Android…"))
                         .font(.caption2).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
@@ -428,7 +430,7 @@ struct GuestScreenView: View {
 
                         Menu {
                             Button { onBack() } label: {
-                                Label("Back to Husk", systemImage: "chevron.left")
+                                Label(LocalizedStringKey(L("Back to Husk")), systemImage: "chevron.left")
                             }
                             // Android's own Home key, over the bridge. Three-button
                             // navigation is not drawn in this guest, so without it
@@ -439,7 +441,7 @@ struct GuestScreenView: View {
                                         "input keyevent KEYCODE_HOME", timeout: 20)
                                     HuskLog.log("ui", "sent HOME to Android")
                                 }
-                            } label: { Label("Home", systemImage: "house") }
+                            } label: { Label(LocalizedStringKey(L("Home")), systemImage: "house") }
                             // Android will not reshape its panel, so when an app
                             // asks for landscape it turns its own composition
                             // inside a portrait frame. This turns it back.
@@ -447,19 +449,19 @@ struct GuestScreenView: View {
                                 HuskGLView.rotated.toggle()
                                 rotated = HuskGLView.rotated
                             } label: {
-                                Label(rotated ? "Unrotate picture" : "Rotate picture",
+                                Label(rotated ? L("Unrotate picture") : L("Rotate picture"),
                                       systemImage: "rotate.right")
                             }
                             Divider()
                             Button {
                                 QemuRunner.shared.saveState(reason: "asked from full screen")
                             } label: {
-                                Label(runner.isSavingState ? "Saving…" : "Save Android",
+                                Label(runner.isSavingState ? L("Saving…") : L("Save Android"),
                                       systemImage: "externaldrive.badge.checkmark")
                             }
                             .disabled(runner.isSavingState)
                             Button { showLogs = true } label: {
-                                Label("Console", systemImage: "terminal")
+                                Label(LocalizedStringKey(L("Console")), systemImage: "terminal")
                             }
                         } label: {
                             Image(systemName: "ellipsis")
@@ -509,7 +511,7 @@ struct LogView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 1) {
                         ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
-                            Text(line)
+                            Text(Lv(line))
                                 .font(.system(size: 9, design: .monospaced))
                                 .textSelection(.enabled)
                                 .foregroundStyle(color(for: line))
@@ -526,12 +528,12 @@ struct LogView: View {
                     }
                 }
             }
-            .navigationTitle("Logs")
+            .navigationTitle(LocalizedStringKey(L("Logs")))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     if isSheet {
-                        Button("Done") { dismiss() }
+                        Button(LocalizedStringKey(L("Done"))) { dismiss() }
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
@@ -587,7 +589,7 @@ struct ControlsSheet: View {
             Theme.backdrop
             VStack(spacing: 16) {
                 HStack {
-                    Text("Controls")
+                    Text(LocalizedStringKey(L("Controls")))
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(Theme.text)
                     Spacer()
@@ -618,8 +620,7 @@ struct ControlsSheet: View {
                     row("computermouse", "Mouse", on: false, available: false)
                 }
 
-                Text("Touch always works. A gamepad and a pointer are not wired "
-                   + "through to Android yet.")
+                Text(LocalizedStringKey(L("Touch always works. A gamepad and a pointer are not wired through to Android yet.")))
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textDim)
                     .multilineTextAlignment(.center)
@@ -640,7 +641,7 @@ struct ControlsSheet: View {
                 .frame(width: 34, height: 34)
                 .background(Theme.surfaceHigh,
                             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            Text(title)
+            Text(Lv(title))
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(available ? Theme.text : Theme.textDim.opacity(0.6))
             Spacer()
@@ -649,7 +650,7 @@ struct ControlsSheet: View {
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.accent)
             } else if !available {
-                Text("Not yet").font(.system(size: 12)).foregroundStyle(Theme.textDim)
+                Text(LocalizedStringKey(L("Not yet"))).font(.system(size: 12)).foregroundStyle(Theme.textDim)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)

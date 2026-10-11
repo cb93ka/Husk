@@ -93,7 +93,7 @@ struct BootScreen: View {
                 // An escape hatch, but not an invitation: it turns up only once
                 // waiting has stopped being novel.
                 if now.timeIntervalSince(began) > 8 {
-                    Button("Use Husk while it starts", action: onSkip)
+                    Button(LocalizedStringKey(L("Use Husk while it starts")), action: onSkip)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Theme.textDim)
                         .padding(.top, 14)
@@ -128,7 +128,7 @@ struct BootScreen: View {
                     .foregroundStyle(Theme.accent)
                 Spacer()
                 if let left = remaining {
-                    Text(left)
+                    Text(Lv(left))
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.textDim)
                 }
@@ -165,7 +165,7 @@ struct BootScreen: View {
         if done >= 58, !QemuRunner.didRestore {
             let mins = Int(now.timeIntervalSince(QemuRunner.bootStarted) / 60)
             return mins < 1 ? "first boot takes 5–15 min"
-                            : "\(mins) min · first boot takes 5–15 min"
+                            : L("\(mins) min · first boot takes 5–15 min")
         }
         guard done >= 8, done <= 92 else { return nil }
         let elapsed = now.timeIntervalSince(began)

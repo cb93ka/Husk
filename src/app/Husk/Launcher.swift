@@ -87,7 +87,7 @@ enum LibraryItem: Identifiable, Hashable {
         let rel = RelativeDateTimeFormatter()
         rel.unitsStyle = .full
         let ago = date.timeIntervalSinceNow > -60 ? "just now" : rel.localizedString(for: date, relativeTo: Date())
-        return (isGame ? "Played " : "Opened ") + ago
+        return (isGame ? L("Played ") : L("Opened ")) + ago
     }
 }
 
@@ -97,9 +97,9 @@ enum LibraryFilter: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .all: return "All"
-        case .games: return "Games"
-        case .apps: return "Apps"
+        case .all: return L("All")
+        case .games: return L("Games")
+        case .apps: return L("Apps")
         }
     }
 }
@@ -155,7 +155,7 @@ struct HomeView: View {
                             .font(.system(size: 28, weight: .heavy, design: .rounded))
                         Spacer()
                         HeaderButton(systemImage: "plus") { router.addSomething() }
-                            .accessibilityLabel("Add a Game or App")
+                            .accessibilityLabel(LocalizedStringKey(L("Add a Game or App")))
                     }
                     .padding(.horizontal, 4)
                     .padding(.bottom, 6)
@@ -175,13 +175,13 @@ struct HomeView: View {
                         AndroidTile()
                     }
                     if let error = jit.error, !Launcher.jitOn {
-                        Text(error).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                        Text(Lv(error)).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 4)
                     }
 
                     let rest = items.filter { $0 != lead }
                     if !rest.isEmpty {
-                        ShelfHeader(title: "Library") { router.showLibrary(.all) }
+                        ShelfHeader(title: L("Library")) { router.showLibrary(.all) }
                             .padding(.horizontal, 4)
                             .padding(.top, 6)
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 10) {
@@ -253,11 +253,11 @@ private struct LeadTile: View {
                     HStack(spacing: 12) {
                         ItemIcon(item: item, size: 40)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(item.title)
+                            Text(Lv(item.title))
                                 .font(.headline)
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
-                            Text(item.usedText ?? (item.isGame ? "Ready to play" : "Ready to open"))
+                            Text(item.usedText ?? (item.isGame ? L("Ready to play") : L("Ready to open")))
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -275,7 +275,7 @@ private struct LeadTile: View {
                         .background(Color.accentColor, in: Circle())
                 }
                 .buttonStyle(CardButtonStyle())
-                .accessibilityLabel((item.isGame ? "Play " : "Open ") + item.title)
+                .accessibilityLabel((item.isGame ? L("Play ") : L("Open ")) + item.title)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
@@ -311,8 +311,8 @@ private struct JITTile: View {
                         if jit.busy { ProgressView() }
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(isOn ? "JIT on" : "JIT off").font(.headline).foregroundStyle(.primary)
-                        Text(isOn ? "via \(via)" : jit.busy ? (jit.status ?? "Turning on…") : "Tap to turn on")
+                        Text(isOn ? L("JIT on") : L("JIT off")).font(.headline).foregroundStyle(.primary)
+                        Text(isOn ? "via \(via)" : jit.busy ? (jit.status ?? L("Turning on…")) : L("Tap to turn on"))
                             .font(.footnote).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
@@ -342,12 +342,12 @@ private struct DownloadsTile: View {
             let total = running.reduce(Int64(0)) { $0 + $1.total }
             let got = running.reduce(Int64(0)) { $0 + $1.received }
             let pct = total > 0 ? " · \(Int(Double(got) / Double(total) * 100))%" : ""
-            return "\(running.count) downloading\(pct)"
+            return L("\(running.count) downloading\(pct)")
         }
-        if downloads.jobs.contains(where: \.failed) { return "Something failed" }
-        if let release = updates.available { return "Husk \(release.version) is out" }
-        if guest.update.isSomething { return "Android update ready" }
-        return "Up to date"
+        if downloads.jobs.contains(where: \.failed) { return L("Something failed") }
+        if let release = updates.available { return L("Husk \(release.version) is out") }
+        if guest.update.isSomething { return L("Android update ready") }
+        return L("Up to date")
     }
 
     var body: some View {
@@ -356,8 +356,8 @@ private struct DownloadsTile: View {
                 VStack(alignment: .leading, spacing: 18) {
                     TileGlyph(systemImage: "arrow.down", color: .indigo)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Downloads").font(.headline).foregroundStyle(.primary)
-                        Text(status).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
+                        Text(LocalizedStringKey(L("Downloads"))).font(.headline).foregroundStyle(.primary)
+                        Text(Lv(status)).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
             }
@@ -378,7 +378,7 @@ private struct AndroidTile: View {
                         TileGlyph(systemImage: "apps.iphone", color: AndroidMark.green, size: 40)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Android").font(.headline).foregroundStyle(.primary)
-                            Text("For apps the translation layer can't run yet")
+                            Text(LocalizedStringKey(L("For apps the translation layer can't run yet")))
                                 .font(.footnote).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -430,16 +430,15 @@ private struct WelcomeCard: View {
                 .frame(width: 60, height: 60)
                 .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             VStack(alignment: .leading, spacing: 6) {
-                Text("Add your first game")
+                Text(LocalizedStringKey(L("Add your first game")))
                     .font(.system(.title2, design: .rounded).weight(.bold))
-                Text("Pick an APK or a bundle (.xapk, .apkm, .apks), or share one to Husk from Files or Safari. Games run "
-                   + "straight on your iPhone. Other apps run inside Android.")
+                Text(LocalizedStringKey(L("Pick an APK or a bundle (.xapk, .apkm, .apks), or share one to Husk from Files or Safari. Games run straight on your iPhone. Other apps run inside Android.")))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Button { router.addSomething() } label: {
-                Text("Add a Game or App").frame(maxWidth: .infinity)
+                Text(LocalizedStringKey(L("Add a Game or App"))).frame(maxWidth: .infinity)
             }
             .buttonStyle(PrimaryButtonStyle())
         }
@@ -454,9 +453,9 @@ private struct ShelfHeader: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.system(.title3, design: .rounded).weight(.bold))
+            Text(Lv(title)).font(.system(.title3, design: .rounded).weight(.bold))
             Spacer()
-            Button("See All", action: seeAll).font(.subheadline.weight(.semibold))
+            Button(LocalizedStringKey(L("See All")), action: seeAll).font(.subheadline.weight(.semibold))
         }
         .padding(.bottom, -10)
     }
@@ -566,16 +565,16 @@ struct LibraryScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack {
-                        Text("Library")
+                        Text(LocalizedStringKey(L("Library")))
                             .font(.system(size: 28, weight: .heavy, design: .rounded))
                         Spacer()
                         HeaderButton(systemImage: "plus") { router.addSomething() }
-                            .accessibilityLabel("Add a Game or App")
+                            .accessibilityLabel(LocalizedStringKey(L("Add a Game or App")))
                     }
                     .padding(.horizontal, 4)
                     .padding(.bottom, 6)
-                    SearchField(text: $query, prompt: "Search games and apps")
-                    Picker("Show", selection: $router.libraryFilter) {
+                    SearchField(text: $query, prompt: L("Search games and apps"))
+                    Picker(LocalizedStringKey(L("Show")), selection: $router.libraryFilter) {
                         ForEach(LibraryFilter.allCases) { Text($0.title).tag($0) }
                     }
                     .pickerStyle(.segmented)
@@ -590,7 +589,7 @@ struct LibraryScreen: View {
                     let apps = (matches(query, "Android") ? [LibraryItem.android] : []) + items.filter { !$0.isGame }
 
                     if router.libraryFilter != .apps {
-                        section("Games", games, empty: query.isEmpty ? "Add a game with the + button." : nil)
+                        section("Games", games, empty: query.isEmpty ? L("Add a game with the + button.") : nil)
                     }
                     if router.libraryFilter != .games {
                         section("Apps", apps, empty: nil)
@@ -615,11 +614,11 @@ struct LibraryScreen: View {
             Tile {
                 VStack(alignment: .leading, spacing: 16) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(title).font(.headline)
+                        Text(Lv(title)).font(.headline)
                         Text("\(items.count)").font(.subheadline).foregroundStyle(.secondary)
                     }
                     if items.isEmpty, let empty {
-                        Text(empty).font(.subheadline).foregroundStyle(.secondary)
+                        Text(Lv(empty)).font(.subheadline).foregroundStyle(.secondary)
                     } else {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .top),
                                                  count: UIDevice.current.userInterfaceIdiom == .pad ? 8 : 4),
@@ -644,7 +643,7 @@ struct LibraryScreen: View {
             let c = g.compatibility
             return c.kind == .unsupported ? c.short : nil
         case .android:
-            if AndroidHost.shared.isReady { return "Running" }
+            if AndroidHost.shared.isReady { return L("Running") }
             return guest.state == .ready ? nil : "Not installed"
         case .app: return nil
         }
@@ -681,13 +680,13 @@ struct LauncherTile: View {
                 if let result { GameStatusBadge(result: result).offset(x: 5, y: -5) }
             }
             VStack(spacing: 1) {
-                Text(title)
+                Text(Lv(title))
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
                 if let caption {
-                    Text(caption).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    Text(Lv(caption)).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             .padding(.top, item?.runsInAndroid == true ? 3 : 0)
@@ -722,7 +721,7 @@ struct BusyStrip: View {
     var body: some View {
         HStack(spacing: 12) {
             ProgressView()
-            Text(text).font(.subheadline).lineLimit(2)
+            Text(Lv(text)).font(.subheadline).lineLimit(2)
             Spacer(minLength: 0)
         }
         .padding(14)
@@ -752,14 +751,14 @@ struct SearchField: View {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Clear")
+                    .accessibilityLabel(LocalizedStringKey(L("Clear")))
                 }
             }
             .padding(.horizontal, 10)
             .frame(height: 38)
             .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             if focused {
-                Button("Cancel") { text = ""; focused = false }
+                Button(LocalizedStringKey(L("Cancel"))) { text = ""; focused = false }
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
@@ -773,8 +772,8 @@ struct NoResults: View {
     var body: some View {
         VStack(spacing: 8) {
             Image(systemName: "magnifyingglass").font(.system(size: 28, weight: .light)).foregroundStyle(.secondary)
-            Text("No Results").font(.headline)
-            Text("Nothing here is called “\(query)”.").font(.subheadline).foregroundStyle(.secondary)
+            Text(LocalizedStringKey(L("No Results"))).font(.headline)
+            Text(LocalizedStringKey(L("Nothing here is called “\(query)”."))).font(.subheadline).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 48)
@@ -818,6 +817,6 @@ private struct LibraryRouteView: View {
 
 private struct GoneView: View {
     var body: some View {
-        Text("This was removed.").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+        Text(LocalizedStringKey(L("This was removed."))).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

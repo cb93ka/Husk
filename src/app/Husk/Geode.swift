@@ -149,7 +149,7 @@ final class GeodeSupport: ObservableObject {
         let (data, response) = try await URLSession.shared.data(for: req)
         guard (response as? HTTPURLResponse)?.statusCode == 200,
               let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw GeodeError("\(url.host ?? "The server") did not answer (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)).")
+            throw GeodeError("\(url.host ?? L("The server")) did not answer (HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)).")
         }
         return obj
     }

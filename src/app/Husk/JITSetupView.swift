@@ -64,45 +64,44 @@ struct JITSetupFlow: View {
     // MARK: Choose
 
     private var choose: some View {
-        page(symbol: "bolt.fill", title: "Turn on JIT",
-             subtitle: "Android needs memory it can write and then run, which on iOS only an attached "
-                     + "debugger can grant. Choose how your \(device) gets one.") {
+        page(symbol: "bolt.fill", title: L("Turn on JIT"),
+             subtitle: L("Android needs memory it can write and then run, which on iOS only an attached debugger can grant. Choose how your \(device) gets one.")) {
             VStack(spacing: 10) {
                 let builtIn = HuskBuiltInJIT.unavailableReason
                 way("Pair on this \(device)", symbol: "iphone.radiowaves.left.and.right",
-                    detail: builtIn ?? (!OnDevicePairing.isSupported ? "Needs iOS 27 or later."
-                        : jit.pairingSource == .onDevice ? "Paired on this \(device)."
-                        : "No computer needed. Pairs from Settings in a minute."),
+                    detail: builtIn ?? (!OnDevicePairing.isSupported ? L("Needs iOS 27 or later.")
+                        : jit.pairingSource == .onDevice ? L("Paired on this \(device).")
+                        : L("No computer needed. Pairs from Settings in a minute.")),
                     done: jit.pairingSource == .onDevice,
                     enabled: builtIn == nil && OnDevicePairing.isSupported) { path.append(.pairOnDevice) }
                 way("Use a pairing file", symbol: "doc.badge.plus",
-                    detail: builtIn ?? (jit.pairingSource == .imported ? "Pairing file imported."
-                        : "Import a pairing file made on a computer."),
+                    detail: builtIn ?? (jit.pairingSource == .imported ? L("Pairing file imported.")
+                        : L("Import a pairing file made on a computer.")),
                     done: jit.pairingSource == .imported,
                     enabled: builtIn == nil) { path.append(.importFile) }
                 way("Use StikDebug", symbol: "ant",
-                    detail: JITBootstrap.isStikDebugInstalled ? "StikDebug is installed."
-                        : "Enable JIT through the StikDebug app.",
+                    detail: JITBootstrap.isStikDebugInstalled ? L("StikDebug is installed.")
+                        : L("Enable JIT through the StikDebug app."),
                     done: jit.method == .stikDebug) { path.append(.stikDebug) }
                 way("Use TrollStore", symbol: "sparkles",
-                    detail: JITBootstrap.isTrollStoreInstalled ? "TrollStore is installed."
-                        : "For a Husk installed through TrollStore.",
+                    detail: JITBootstrap.isTrollStoreInstalled ? L("TrollStore is installed.")
+                        : L("For a Husk installed through TrollStore."),
                     done: jit.method == .trollStore) { path.append(.trollStore) }
                 way("Use a jailbreak", symbol: "lock.open",
-                    detail: JITBootstrap.debuggedAtLaunch ? "JIT was already on when Husk opened."
-                        : JITBootstrap.isJailbroken ? "A jailbreak was found. Turn on Allow JIT in Apps."
-                        : "Dopamine can give every app JIT with one setting.",
+                    detail: JITBootstrap.debuggedAtLaunch ? L("JIT was already on when Husk opened.")
+                        : JITBootstrap.isJailbroken ? L("A jailbreak was found. Turn on Allow JIT in Apps.")
+                        : L("Dopamine can give every app JIT with one setting."),
                     done: jit.method == .jailbreak || JITBootstrap.debuggedAtLaunch) { path.append(.jailbreak) }
             }
             if jit.hasPairing && HuskBuiltInJIT.isAvailable {
                 Button { path.append(.connect) } label: {
-                    Label("Continue with the current pairing", systemImage: "arrow.right")
+                    Label(LocalizedStringKey(L("Continue with the current pairing")), systemImage: "arrow.right")
                         .font(.system(size: 14, weight: .semibold))
                 }
                 .padding(.top, 4)
             }
         } actions: {
-            Button("Not now") { close() }
+            Button(LocalizedStringKey(L("Not now"))) { close() }
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(Theme.textDim)
         }
@@ -118,8 +117,8 @@ struct JITSetupFlow: View {
                     .frame(width: 34, height: 34)
                     .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
-                    Text(detail).font(.system(size: 13)).foregroundStyle(Theme.textDim)
+                    Text(Lv(title)).font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.text)
+                    Text(Lv(detail)).font(.system(size: 13)).foregroundStyle(Theme.textDim)
                         .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.leading)
                 }
@@ -145,9 +144,8 @@ struct JITSetupFlow: View {
     }
 
     private var pairOnDevice: some View {
-        page(symbol: "iphone.radiowaves.left.and.right", title: "Pair on this \(device)",
-             subtitle: "Husk pretends to be a computer on your Wi-Fi, and your \(device) pairs with it "
-                     + "the way it would with a Mac.") {
+        page(symbol: "iphone.radiowaves.left.and.right", title: L("Pair on this \(device)"),
+             subtitle: L("Husk pretends to be a computer on your Wi-Fi, and your \(device) pairs with it the way it would with a Mac.")) {
             VStack(alignment: .leading, spacing: 14) {
                 point(1, "Turn on Wi-Fi, tap **Start pairing** below and allow Local Network access.",
                       done: pairing.phase != .idle)
@@ -165,15 +163,15 @@ struct JITSetupFlow: View {
             switch pairing.phase {
             case .idle, .failed:
                 Button { pairing.start() } label: {
-                    Label("Start pairing", systemImage: "dot.radiowaves.left.and.right")
+                    Label(LocalizedStringKey(L("Start pairing")), systemImage: "dot.radiowaves.left.and.right")
                 }
                 .buttonStyle(PrimaryButtonStyle())
             case .waiting, .pin:
-                Button("Cancel pairing", role: .cancel) { pairing.cancel() }
+                Button(LocalizedStringKey(L("Cancel pairing")), role: .cancel) { pairing.cancel() }
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Theme.textDim)
             case .paired:
-                Button("Continue") { path.append(.connect) }
+                Button(LocalizedStringKey(L("Continue"))) { path.append(.connect) }
                     .buttonStyle(PrimaryButtonStyle())
             }
         }
@@ -187,16 +185,15 @@ struct JITSetupFlow: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
                     ProgressView().tint(Theme.accent)
-                    Text("Waiting for your \(device)…").font(.system(size: 15, weight: .semibold))
+                    Text(LocalizedStringKey(L("Waiting for your \(device)…"))).font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Theme.text)
                 }
-                Button("Open Settings") {
+                Button(LocalizedStringKey(L("Open Settings"))) {
                     if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                 }
                 .font(.system(size: 14, weight: .semibold))
                 if pairing.backgroundLimited {
-                    Text("This installation can only wait about 30 seconds in the background, "
-                       + "so go to Settings straight away.")
+                    Text(LocalizedStringKey(L("This installation can only wait about 30 seconds in the background, so go to Settings straight away.")))
                         .font(.system(size: 13)).foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -205,12 +202,12 @@ struct JITSetupFlow: View {
             .padding(16).huskCard()
         case .pin(let pin):
             VStack(spacing: 8) {
-                Text("Enter this code on your \(device)").font(.system(size: 14))
+                Text(LocalizedStringKey(L("Enter this code on your \(device)"))).font(.system(size: 14))
                     .foregroundStyle(Theme.textDim)
-                Text(pin).font(.system(size: 40, weight: .bold, design: .monospaced)).tracking(6)
+                Text(Lv(pin)).font(.system(size: 40, weight: .bold, design: .monospaced)).tracking(6)
                     .foregroundStyle(Theme.text)
                     .textSelection(.enabled)
-                    .accessibilityLabel("Pairing code \(pin.map(String.init).joined(separator: " "))")
+                    .accessibilityLabel(LocalizedStringKey(L("Pairing code \(pin.map(String.init).joined(separator: " "))")))
             }
             .frame(maxWidth: .infinity)
             .padding(18).huskCard(high: true)
@@ -224,8 +221,8 @@ struct JITSetupFlow: View {
     // MARK: Import a pairing file
 
     private var importFile: some View {
-        page(symbol: "doc.badge.plus", title: "Use a pairing file",
-             subtitle: "A pairing file made on a computer lets Husk talk to this \(device) the same way.") {
+        page(symbol: "doc.badge.plus", title: L("Use a pairing file"),
+             subtitle: L("A pairing file made on a computer lets Husk talk to this \(device) the same way.")) {
             VStack(alignment: .leading, spacing: 14) {
                 point(1, "On a computer, make this \(device)'s pairing file with the "
                        + "[StikDebug pairing-file guide](https://github.com/StikDebug/StikDebug-Guide/blob/main/pairing_file.md).",
@@ -235,17 +232,17 @@ struct JITSetupFlow: View {
                 point(3, "Tap **Choose pairing file** and pick it.", done: jit.pairingSource == .imported)
             }
             .padding(16).huskCard()
-            Label("The pairing file stays in Husk's Documents folder and is only sent to Husk's own helper.",
+            Label(LocalizedStringKey(L("The pairing file stays in Husk's Documents folder and is only sent to Husk's own helper.")),
                   systemImage: "lock.fill")
                 .font(.system(size: 13)).foregroundStyle(Theme.textDim)
             if let error = jit.error { outcome(error, ok: false) }
         } actions: {
             if jit.pairingSource == .imported {
-                Button("Continue") { path.append(.connect) }.buttonStyle(PrimaryButtonStyle())
-                Button("Choose another file") { importing = true }
+                Button(LocalizedStringKey(L("Continue"))) { path.append(.connect) }.buttonStyle(PrimaryButtonStyle())
+                Button(LocalizedStringKey(L("Choose another file"))) { importing = true }
                     .font(.system(size: 15, weight: .medium))
             } else {
-                Button { importing = true } label: { Label("Choose pairing file", systemImage: "folder") }
+                Button { importing = true } label: { Label(LocalizedStringKey(L("Choose pairing file")), systemImage: "folder") }
                     .buttonStyle(PrimaryButtonStyle())
             }
         }
@@ -254,9 +251,8 @@ struct JITSetupFlow: View {
     // MARK: LocalDevVPN
 
     private var connect: some View {
-        page(symbol: "network.badge.shield.half.filled", title: "Connect LocalDevVPN",
-             subtitle: "Husk's helper reaches this \(device)'s debugging service through a local VPN. "
-                     + "Nothing leaves your \(device).") {
+        page(symbol: "network.badge.shield.half.filled", title: L("Connect LocalDevVPN"),
+             subtitle: L("Husk's helper reaches this \(device)'s debugging service through a local VPN. Nothing leaves your \(device).")) {
             VStack(alignment: .leading, spacing: 14) {
                 point(1, "Install [LocalDevVPN](\(LocalDevVPN.appStore.absoluteString)) from the App Store.",
                       done: LocalDevVPN.isInstalled)
@@ -267,7 +263,7 @@ struct JITSetupFlow: View {
         } actions: {
             Button(LocalDevVPN.actionTitle) { LocalDevVPN.open() }
                 .buttonStyle(PrimaryButtonStyle())
-            Button("It's connected") { path.append(.enable) }
+            Button(LocalizedStringKey(L("It's connected"))) { path.append(.enable) }
                 .font(.system(size: 15, weight: .medium))
         }
     }
@@ -277,9 +273,8 @@ struct JITSetupFlow: View {
     private var attached: Bool { jit.attachGeneration > 0 || JITBootstrap.debuggedFlag }
 
     private var enable: some View {
-        page(symbol: "bolt.badge.checkmark", title: "Turn on JIT",
-             subtitle: "The first check downloads and mounts Apple's Developer Disk Image, "
-                     + "which can take a minute.") {
+        page(symbol: "bolt.badge.checkmark", title: L("Turn on JIT"),
+             subtitle: L("The first check downloads and mounts Apple's Developer Disk Image, which can take a minute.")) {
             VStack(alignment: .leading, spacing: 14) {
                 point(1, "Tap **Check setup**. Husk checks LocalDevVPN and prepares the Developer Disk Image.",
                       done: jit.prepared || attached)
@@ -290,7 +285,7 @@ struct JITSetupFlow: View {
             if jit.busy {
                 HStack(spacing: 11) {
                     ProgressView().tint(Theme.accent)
-                    Text(jit.status ?? "Working…").font(.system(size: 14)).foregroundStyle(Theme.text)
+                    Text(jit.status ?? L("Working…")).font(.system(size: 14)).foregroundStyle(Theme.text)
                     Spacer(minLength: 0)
                 }
                 .padding(16).huskCard(high: true)
@@ -300,7 +295,7 @@ struct JITSetupFlow: View {
                 VStack(alignment: .leading, spacing: 10) {
                     outcome(error, ok: false)
                     if jit.connectionProblem == .pairing {
-                        Button(OnDevicePairing.isSupported ? "Pair again" : "Import a new pairing file") {
+                        Button(OnDevicePairing.isSupported ? L("Pair again") : L("Import a new pairing file")) {
                             path = [OnDevicePairing.isSupported ? .pairOnDevice : .importFile]
                         }
                         .font(.system(size: 14, weight: .semibold))
@@ -315,20 +310,20 @@ struct JITSetupFlow: View {
             }
 
             if !attached {
-                Button("Reset Developer Disk Image", role: .destructive) { jit.resetDDI() }
+                Button(LocalizedStringKey(L("Reset Developer Disk Image")), role: .destructive) { jit.resetDDI() }
                     .font(.system(size: 13, weight: .medium))
                     .disabled(jit.busy)
                     .padding(.top, 4)
             }
         } actions: {
             if attached {
-                Button("Done") { close() }.buttonStyle(PrimaryButtonStyle())
+                Button(LocalizedStringKey(L("Done"))) { close() }.buttonStyle(PrimaryButtonStyle())
             } else if jit.prepared {
-                Button { jit.enableBuiltIn() } label: { Label("Enable JIT", systemImage: "bolt.fill") }
+                Button { jit.enableBuiltIn() } label: { Label(LocalizedStringKey(L("Enable JIT")), systemImage: "bolt.fill") }
                     .buttonStyle(PrimaryButtonStyle(enabled: !jit.busy))
                     .disabled(jit.busy)
             } else {
-                Button("Check setup") { jit.prepareBuiltIn() }
+                Button(LocalizedStringKey(L("Check setup"))) { jit.prepareBuiltIn() }
                     .buttonStyle(PrimaryButtonStyle(enabled: !jit.busy))
                     .disabled(jit.busy)
             }
@@ -338,9 +333,8 @@ struct JITSetupFlow: View {
     // MARK: StikDebug
 
     private var stikDebug: some View {
-        page(symbol: "ant", title: "Use StikDebug",
-             subtitle: "StikDebug is a separate app that attaches to Husk. Husk sends it the JIT script "
-                     + "itself, so nothing needs configuring for Husk inside StikDebug.") {
+        page(symbol: "ant", title: L("Use StikDebug"),
+             subtitle: L("StikDebug is a separate app that attaches to Husk. Husk sends it the JIT script itself, so nothing needs configuring for Husk inside StikDebug.")) {
             VStack(alignment: .leading, spacing: 14) {
                 point(1, "Install [StikDebug](https://github.com/StikDebug/StikDebug/releases/latest).",
                       done: JITBootstrap.isStikDebugInstalled)
@@ -350,7 +344,7 @@ struct JITSetupFlow: View {
             }
             .padding(16).huskCard()
         } actions: {
-            Button("Use StikDebug") {
+            Button(LocalizedStringKey(L("Use StikDebug"))) {
                 jit.method = .stikDebug
                 HuskLog.log("ui", "JIT method set to StikDebug")
                 close()
@@ -362,9 +356,8 @@ struct JITSetupFlow: View {
     // MARK: TrollStore
 
     private var trollStore: some View {
-        page(symbol: "sparkles", title: "Use TrollStore",
-             subtitle: "TrollStore can enable JIT for apps it installed, with no pairing file, "
-                     + "VPN or computer.") {
+        page(symbol: "sparkles", title: L("Use TrollStore"),
+             subtitle: L("TrollStore can enable JIT for apps it installed, with no pairing file, VPN or computer.")) {
             VStack(alignment: .leading, spacing: 14) {
                 point(1, "Install Husk.ipa through TrollStore, on an iOS version TrollStore supports. It carries the "
                        + "entitlements TrollStore keeps, so the same file works there and in a sideloader.",
@@ -376,13 +369,12 @@ struct JITSetupFlow: View {
             }
             .padding(16).huskCard()
             if !JITBootstrap.isTrollStoreInstalled {
-                Label("TrollStore was not found on this \(device). Husk can only use it once it is installed "
-                    + "and Husk was installed through it.", systemImage: "info.circle")
+                Label(LocalizedStringKey(L("TrollStore was not found on this \(device). Husk can only use it once it is installed and Husk was installed through it.")), systemImage: "info.circle")
                     .font(.system(size: 13)).foregroundStyle(Theme.textDim)
                     .fixedSize(horizontal: false, vertical: true)
             }
         } actions: {
-            Button("Use TrollStore") {
+            Button(LocalizedStringKey(L("Use TrollStore"))) {
                 jit.method = .trollStore
                 HuskLog.log("ui", "JIT method set to TrollStore")
                 close()
@@ -394,9 +386,8 @@ struct JITSetupFlow: View {
     // MARK: Jailbreak
 
     private var jailbreak: some View {
-        page(symbol: "lock.open", title: "Use a jailbreak",
-             subtitle: "On a device jailbroken with Dopamine, JIT is a setting: the jailbreak marks every app as "
-                     + "debugged when it opens, and a debugged app may run code it wrote. Husk needs nothing else.") {
+        page(symbol: "lock.open", title: L("Use a jailbreak"),
+             subtitle: L("On a device jailbroken with Dopamine, JIT is a setting: the jailbreak marks every app as debugged when it opens, and a debugged app may run code it wrote. Husk needs nothing else.")) {
             VStack(alignment: .leading, spacing: 14) {
                 point(1, "Open Dopamine and go to its Settings.", done: JITBootstrap.isJailbroken)
                 point(2, "Turn on Allow JIT in Apps.")
@@ -405,14 +396,14 @@ struct JITSetupFlow: View {
             }
             .padding(16).huskCard()
             if JITBootstrap.debuggedAtLaunch {
-                Label("Husk was marked as debugged when it opened, so JIT is on.", systemImage: "checkmark.circle.fill")
+                Label(LocalizedStringKey(L("Husk was marked as debugged when it opened, so JIT is on.")), systemImage: "checkmark.circle.fill")
                     .font(.system(size: 13)).foregroundStyle(.green)
             } else if !JITBootstrap.isJailbroken {
-                Label("No jailbreak was found on this \(device).", systemImage: "info.circle")
+                Label(LocalizedStringKey(L("No jailbreak was found on this \(device).")), systemImage: "info.circle")
                     .font(.system(size: 13)).foregroundStyle(Theme.textDim)
             }
         } actions: {
-            Button("Use the jailbreak") {
+            Button(LocalizedStringKey(L("Use the jailbreak"))) {
                 jit.method = .jailbreak
                 HuskLog.log("ui", "JIT method set to jailbreak")
                 close()
@@ -436,8 +427,8 @@ struct JITSetupFlow: View {
                         .foregroundStyle(Theme.accent)
                         .frame(width: 56, height: 56)
                         .background(Theme.accentSoft, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    Text(title).font(.system(size: 28, weight: .semibold)).foregroundStyle(Theme.text)
-                    Text(subtitle).font(.system(size: 15)).foregroundStyle(Theme.textDim)
+                    Text(Lv(title)).font(.system(size: 28, weight: .semibold)).foregroundStyle(Theme.text)
+                    Text(Lv(subtitle)).font(.system(size: 15)).foregroundStyle(Theme.textDim)
                         .fixedSize(horizontal: false, vertical: true)
                     content()
                 }
@@ -452,7 +443,7 @@ struct JITSetupFlow: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Close") { close() }
+                Button(LocalizedStringKey(L("Close"))) { close() }
             }
         }
     }
@@ -477,7 +468,7 @@ struct JITSetupFlow: View {
     }
 
     private func outcome(_ text: String, ok: Bool) -> some View {
-        Label(text, systemImage: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+        Label(Lv(text), systemImage: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
             .font(.system(size: 14, weight: .medium))
             .foregroundStyle(ok ? .green : .red)
             .fixedSize(horizontal: false, vertical: true)

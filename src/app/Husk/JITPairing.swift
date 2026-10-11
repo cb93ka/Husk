@@ -79,7 +79,7 @@ import UserNotifications
         guard Self.isSupported, !active, session == nil else { return }
         var error: UnsafeMutablePointer<CChar>?
         guard let session = husk_rppairing_new(Self.hostName, &error) else {
-            fail(Self.take(error) ?? "Husk could not open its pairing port.")
+            fail(Self.take(error) ?? L("Husk could not open its pairing port."))
             return
         }
         self.session = session
@@ -139,7 +139,7 @@ import UserNotifications
         phase = .pin(pin)
         log("code shown")
         if #available(iOS 26.0, *), let task = continued as? BGContinuedProcessingTask {
-            task.updateTitle("Pairing code \(pin)", subtitle: "Enter it on this \(Self.deviceKind) to pair with Husk")
+            task.updateTitle("Pairing code \(pin)", subtitle: L("Enter it on this \(Self.deviceKind) to pair with Husk"))
             task.progress.completedUnitCount = 1
         }
         if UIApplication.shared.applicationState != .active {
@@ -170,7 +170,7 @@ import UserNotifications
         case 2:
             endBackground(success: false)
         default:
-            fail(message.map { "Pairing failed: \($0)" } ?? "Pairing failed. Try again.")
+            fail(message.map { "Pairing failed: \($0)" } ?? L("Pairing failed. Try again."))
         }
     }
 
@@ -222,8 +222,8 @@ import UserNotifications
         guard active else { return }
         log("advertising failed error=\(error)")
         fail(error == DNSServiceErrorType(kDNSServiceErr_PolicyDenied)
-             ? "Husk needs Local Network access to pair. Allow it in Settings › Apps › Husk, then try again."
-             : "Husk could not announce itself on the local network. Check that Wi-Fi is on, then try again.")
+             ? L("Husk needs Local Network access to pair. Allow it in Settings › Apps › Husk, then try again.")
+             : L("Husk could not announce itself on the local network. Check that Wi-Fi is on, then try again."))
     }
 
     private func stopAdvertising() {
@@ -265,8 +265,8 @@ import UserNotifications
             guard ok else { log("register refused"); backgroundLimited = true; return }
             registered = identifier
         }
-        let request = BGContinuedProcessingTaskRequest(identifier: identifier, title: "Pairing with Husk",
-                                                       subtitle: "Settings › Privacy & Security › Developer Mode")
+        let request = BGContinuedProcessingTaskRequest(identifier: identifier, title: L("Pairing with Husk"),
+                                                       subtitle: L("Settings › Privacy & Security › Developer Mode"))
         request.strategy = .fail
         do {
             try BGTaskScheduler.shared.submit(request)
@@ -283,7 +283,7 @@ import UserNotifications
         continued = task
         task.progress.totalUnitCount = 2
         if case .pin(let pin) = phase {
-            task.updateTitle("Pairing code \(pin)", subtitle: "Enter it on this \(Self.deviceKind) to pair with Husk")
+            task.updateTitle("Pairing code \(pin)", subtitle: L("Enter it on this \(Self.deviceKind) to pair with Husk"))
             task.progress.completedUnitCount = 1
         }
         task.expirationHandler = {

@@ -244,7 +244,7 @@ struct SpecialKeysBar: View {
                         _ = husk_display_send_key("ctrl", false)
                     }
                 } label: {
-                    Text(label)
+                    Text(Lv(label))
                         .font(.caption2.weight(.medium))
                         .frame(minWidth: 26)
                         .padding(.horizontal, 7).padding(.vertical, 6)

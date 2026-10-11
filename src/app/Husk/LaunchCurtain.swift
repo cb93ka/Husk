@@ -22,7 +22,7 @@ struct LaunchCurtain: View {
             VStack(spacing: 14) {
                 ItemIcon(item: .game(app), size: 84)
                     .shadow(color: .black.opacity(0.5), radius: 14, y: 6)
-                Text(app.label)
+                Text(Lv(app.label))
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(2).multilineTextAlignment(.center)
@@ -61,7 +61,7 @@ struct LaunchCurtain: View {
             } else {
                 ProgressView().progressViewStyle(.circular).tint(.white)
             }
-            Text(stageText)
+            Text(Lv(stageText))
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.white.opacity(0.75))
                 .lineLimit(2).multilineTextAlignment(.center)
@@ -71,19 +71,18 @@ struct LaunchCurtain: View {
     }
 
     private var stageText: String {
-        let stage = model.stage.isEmpty ? "Starting…" : model.stage
+        let stage = model.stage.isEmpty ? L("Starting…") : model.stage
         guard model.fraction >= 0 else { return stage }
         return "\(stage) — \(Int((model.fraction * 100).rounded()))%"
     }
 
     private var failure: some View {
         VStack(spacing: 8) {
-            Label(model.state == Int32(HUSK_UNITY_FAILED) ? "Could not start" : "The game closed before it started",
+            Label(model.state == Int32(HUSK_UNITY_FAILED) ? L("Could not start") : L("The game closed before it started"),
                   systemImage: "exclamationmark.triangle.fill")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.orange)
-            Text("Husk's log (husk.log in the Husk folder in Files) says why. Close Husk completely before trying again: "
-               + "a game cannot be started twice in one run.")
+            Text(LocalizedStringKey(L("Husk's log (husk.log in the Husk folder in Files) says why. Close Husk completely before trying again: a game cannot be started twice in one run.")))
                 .font(.system(size: 13))
                 .foregroundStyle(.white.opacity(0.7))
                 .multilineTextAlignment(.center)

@@ -95,7 +95,7 @@ enum JITBootstrap {
             HuskLog.log("jit", "no trap servicer, but MAP_JIT executes here -- "
                              + "QEMU will map its own buffer")
         } else {
-            lastFailure = "The debugger is attached but is not answering trap "
+            lastFailure = L("The debugger is attached but is not answering trap ")
                         + "requests, and this device will not execute a MAP_JIT "
                         + "mapping either, so no executable memory could be "
                         + "claimed. This is what happens when Husk runs inside "

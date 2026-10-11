@@ -662,7 +662,9 @@ final class TLUnityModel: ObservableObject {
         if state != Int32(HUSK_UNITY_RUNNING) || frames < 2 {
             var buf = [CChar](repeating: 0, count: 200)
             let f = husk_tl_progress(&buf, UInt(buf.count))
-            let s = String(cString: buf)
+            let raw = String(cString: buf)
+            // The runtime says its stage in English; "Loading <library>" is the one with a name in it.
+            let s = raw.hasPrefix("Loading ") ? L("Loading \(String(raw.dropFirst(8)))") : Lv(raw)
             if s != stage { stage = s }
             if abs(f - fraction) > 0.004 { fraction = f }
         }
@@ -675,19 +677,19 @@ final class TLUnityModel: ObservableObject {
 
     var statusText: String {
         switch state {
-        case Int32(HUSK_UNITY_STARTING): return "Loading the engine…"
-        case Int32(HUSK_UNITY_RUNNING):  return "Running"
-        case Int32(HUSK_UNITY_FAILED):   return "Could not start — see the log"
-        case Int32(HUSK_UNITY_ENDED):    return "The game exited"
-        default:                         return "Starting"
+        case Int32(HUSK_UNITY_STARTING): return L("Loading the engine…")
+        case Int32(HUSK_UNITY_RUNNING):  return L("Running")
+        case Int32(HUSK_UNITY_FAILED):   return L("Could not start — see the log")
+        case Int32(HUSK_UNITY_ENDED):    return L("The game exited")
+        default:                         return L("Starting")
         }
     }
 
     var subStatusText: String {
         switch state {
-        case Int32(HUSK_UNITY_RUNNING): return "\(frames) frame(s) drawn · native runtime"
-        case Int32(HUSK_UNITY_STARTING): return "Loading libraries and starting the engine"
-        default: return "Native runtime"
+        case Int32(HUSK_UNITY_RUNNING): return L("\(frames) frame(s) drawn · native runtime")
+        case Int32(HUSK_UNITY_STARTING): return L("Loading libraries and starting the engine")
+        default: return L("Native runtime")
         }
     }
 
@@ -771,9 +773,9 @@ struct TLCocosAttemptView: View {
             Group {
                 if let other = blockedBy {
                     VStack(spacing: 8) {
-                        Text("Another game is already loaded")
+                        Text(LocalizedStringKey(L("Another game is already loaded")))
                             .font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
-                        Text("\(other) was started in this session, and a game cannot be unloaded once it has started. Close Husk completely and open it again to run \(app.label).")
+                        Text(LocalizedStringKey(L("\(other) was started in this session, and a game cannot be unloaded once it has started. Close Husk completely and open it again to run \(app.label).")))
                             .font(.system(size: 13)).foregroundStyle(.white.opacity(0.7))
                             .multilineTextAlignment(.center).frame(maxWidth: 460)
                     }
@@ -822,7 +824,7 @@ struct TLCocosAttemptView: View {
             if hint {
                 VStack {
                     Spacer()
-                    Text("Tap with three fingers to show the interface")
+                    Text(LocalizedStringKey(L("Tap with three fingers to show the interface")))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14).padding(.vertical, 8)
@@ -882,17 +884,17 @@ struct TLCocosAttemptView: View {
                 }
                 HStack(spacing: 10) {
                     Button(padLayout[id].hidden ? "Show" : "Hide") { padLayout[id].hidden.toggle(); padLayout.save(app.id) }
-                    Button("Reset") { padLayout[id] = PadLayout.Adjust(); padLayout.save(app.id) }
+                    Button(LocalizedStringKey(L("Reset"))) { padLayout[id] = PadLayout.Adjust(); padLayout.save(app.id) }
                 }
                 .buttonStyle(.bordered).tint(.white)
             } else {
-                Text("Drag a control to move it, or tap one to resize or hide it.")
+                Text(LocalizedStringKey(L("Drag a control to move it, or tap one to resize or hide it.")))
                     .font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
                     .multilineTextAlignment(.center).frame(maxWidth: 260)
             }
             HStack(spacing: 10) {
-                Button("Reset All", role: .destructive) { padLayout = PadLayout(); padSelected = nil; padLayout.save(app.id) }
-                Button("Done") { editingPad = false; padSelected = nil }.buttonStyle(.borderedProminent)
+                Button(LocalizedStringKey(L("Reset All")), role: .destructive) { padLayout = PadLayout(); padSelected = nil; padLayout.save(app.id) }
+                Button(LocalizedStringKey(L("Done"))) { editingPad = false; padSelected = nil }.buttonStyle(.borderedProminent)
             }
             .buttonStyle(.bordered)
         }
@@ -904,12 +906,12 @@ struct TLCocosAttemptView: View {
     private var bar: some View {
         HStack(spacing: 12) {
             Button { dismiss() } label: {
-                Label("Close", systemImage: "xmark").font(.system(size: 13, weight: .semibold))
+                Label(LocalizedStringKey(L("Close")), systemImage: "xmark").font(.system(size: 13, weight: .semibold))
             }
             .tint(.white)
             if engine == .flutter {
                 Button { husk_flutter_back() } label: {
-                    Label("Back", systemImage: "chevron.backward").font(.system(size: 13, weight: .semibold))
+                    Label(LocalizedStringKey(L("Back")), systemImage: "chevron.backward").font(.system(size: 13, weight: .semibold))
                 }
                 .tint(.white)
             }
@@ -923,28 +925,28 @@ struct TLCocosAttemptView: View {
             }
             if padOffered {
                 Button { settings.padShown.toggle(); settings.save(app.id); if !settings.padShown { editingPad = false } } label: {
-                    Label(settings.padShown ? "Hide pad" : "Pad", systemImage: "gamecontroller").font(.system(size: 12, weight: .semibold))
+                    Label(settings.padShown ? L("Hide pad") : "Pad", systemImage: "gamecontroller").font(.system(size: 12, weight: .semibold))
                 }
                 .tint(.white)
                 if settings.padShown {
                     Button { padSelected = nil; editingPad.toggle() } label: {
-                        Label(editingPad ? "Done" : "Edit pad", systemImage: "slider.horizontal.below.square.and.square.filled")
+                        Label(editingPad ? "Done" : L("Edit pad"), systemImage: "slider.horizontal.below.square.and.square.filled")
                             .font(.system(size: 12, weight: .semibold))
                     }
                     .tint(editingPad ? .yellow : .white)
                 }
             }
             if settings.showStats, model.state == Int32(HUSK_UNITY_RUNNING) {
-                Text(stats).font(.technical(11)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                Text(Lv(stats)).font(.technical(11)).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
             }
             if devInfo {
                 Button { withAnimation(.snappy(duration: 0.25)) { showLog.toggle() } } label: {
-                    Text(showLog ? "Hide log" : "Log").font(.system(size: 12, weight: .semibold))
+                    Text(showLog ? L("Hide log") : "Log").font(.system(size: 12, weight: .semibold))
                 }
                 .tint(.white)
             }
             Button { toggleInterface() } label: {
-                Label("Hide", systemImage: "eye.slash").font(.system(size: 12, weight: .semibold))
+                Label(LocalizedStringKey(L("Hide")), systemImage: "eye.slash").font(.system(size: 12, weight: .semibold))
             }
             .tint(.white)
         }
@@ -956,16 +958,16 @@ struct TLCocosAttemptView: View {
     private var logPanel: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("ATTEMPT LOG").font(.technical(10, weight: .bold)).foregroundStyle(Theme.textDim)
+                Text(LocalizedStringKey(L("ATTEMPT LOG"))).font(.technical(10, weight: .bold)).foregroundStyle(Theme.textDim)
                 Spacer()
                 Button { UIPasteboard.general.string = model.logText } label: {
-                    Label("Copy", systemImage: "doc.on.doc").font(.system(size: 11))
+                    Label(LocalizedStringKey(L("Copy")), systemImage: "doc.on.doc").font(.system(size: 11))
                 }
             }
             .padding(.horizontal, 10).padding(.vertical, 6)
             ScrollViewReader { proxy in
                 ScrollView {
-                    Text(model.logText.isEmpty ? "Starting…" : model.logText)
+                    Text(model.logText.isEmpty ? L("Starting…") : model.logText)
                         .font(.technical(10))
                         .foregroundStyle(Theme.text)
                         .frame(maxWidth: .infinity, alignment: .leading)

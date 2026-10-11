@@ -15,26 +15,26 @@ enum WhatsNew {
     /// The version whose notes these are. A build of the same version shows nothing again.
     static let version = "1.0.1"
     static let items: [Item] = [
-        Item(symbol: "bag.fill", title: "Google Play",
-             detail: "Get games from the Store tab. Play Store downloads, with their split APKs and asset packs, run in the Translation Layer."),
-        Item(symbol: "checkmark.seal.fill", title: "Google Play services",
-             detail: "Games see Play services as present and signed out, so they stop asking for it and carry on."),
-        Item(symbol: "arrow.up.doc.fill", title: "Save backups",
-             detail: "Back up a game's saves to a .zip from its page, and restore them later or on another device."),
-        Item(symbol: "exclamationmark.bubble.fill", title: "Crash reports",
-             detail: "When a game takes Husk down, the next launch says what happened and gives you a report to share."),
-        Item(symbol: "checkmark.circle.fill", title: "Know what works",
-             detail: "The library marks each game with how it did last time: it plays, it crashed, or it did not start."),
-        Item(symbol: "gamecontroller.fill", title: "Godot games",
-             detail: "Games made with Godot 3 and 4 now run in the Translation Layer."),
-        Item(symbol: "slider.horizontal.below.square.and.square.filled", title: "Your own controls",
-             detail: "Move, resize and hide the on-screen controller's buttons, for each game."),
-        Item(symbol: "keyboard.fill", title: "Typing in Minecraft",
-             detail: "Chat, sign and world-name fields bring up the keyboard."),
-        Item(symbol: "arrow.left.arrow.right", title: "Switching games",
-             detail: "Close Husk to play another game, and it starts by itself when Husk opens."),
-        Item(symbol: "puzzlepiece.extension.fill", title: "Geode",
-             detail: "Mods for Geometry Dash, Geode 5 included, turned on from the game's settings."),
+        Item(symbol: "bag.fill", title: L("Google Play"),
+             detail: L("Get games from the Store tab. Play Store downloads, with their split APKs and asset packs, run in the Translation Layer.")),
+        Item(symbol: "checkmark.seal.fill", title: L("Google Play services"),
+             detail: L("Games see Play services as present and signed out, so they stop asking for it and carry on.")),
+        Item(symbol: "arrow.up.doc.fill", title: L("Save backups"),
+             detail: L("Back up a game's saves to a .zip from its page, and restore them later or on another device.")),
+        Item(symbol: "exclamationmark.bubble.fill", title: L("Crash reports"),
+             detail: L("When a game takes Husk down, the next launch says what happened and gives you a report to share.")),
+        Item(symbol: "checkmark.circle.fill", title: L("Know what works"),
+             detail: L("The library marks each game with how it did last time: it plays, it crashed, or it did not start.")),
+        Item(symbol: "gamecontroller.fill", title: L("Godot games"),
+             detail: L("Games made with Godot 3 and 4 now run in the Translation Layer.")),
+        Item(symbol: "slider.horizontal.below.square.and.square.filled", title: L("Your own controls"),
+             detail: L("Move, resize and hide the on-screen controller's buttons, for each game.")),
+        Item(symbol: "keyboard.fill", title: L("Typing in Minecraft"),
+             detail: L("Chat, sign and world-name fields bring up the keyboard.")),
+        Item(symbol: "arrow.left.arrow.right", title: L("Switching games"),
+             detail: L("Close Husk to play another game, and it starts by itself when Husk opens.")),
+        Item(symbol: "puzzlepiece.extension.fill", title: L("Geode"),
+             detail: L("Mods for Geometry Dash, Geode 5 included, turned on from the game's settings.")),
     ]
 
     private static let seenKey = "husk.whatsNew.seen"
@@ -58,8 +58,8 @@ struct WhatsNewSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("What's New in Husk \(WhatsNew.version)").font(.largeTitle.weight(.bold))
-                        Text("The first full release.").foregroundStyle(.secondary)
+                        Text(LocalizedStringKey(L("What's New in Husk \(WhatsNew.version)"))).font(.largeTitle.weight(.bold))
+                        Text(LocalizedStringKey(L("The first full release."))).foregroundStyle(.secondary)
                     }
                     .padding(.top, 36)
                     ForEach(WhatsNew.items) { item in
@@ -69,8 +69,8 @@ struct WhatsNewSheet: View {
                                 .foregroundStyle(Color.accentColor)
                                 .frame(width: 36)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(item.title).font(.headline)
-                                Text(item.detail).font(.subheadline).foregroundStyle(.secondary)
+                                Text(Lv(item.title)).font(.headline)
+                                Text(Lv(item.detail)).font(.subheadline).foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
@@ -80,7 +80,7 @@ struct WhatsNewSheet: View {
                 .padding(.bottom, 20)
             }
             Button(action: done) {
-                Text("Continue").font(.headline).frame(maxWidth: .infinity).padding(.vertical, 8)
+                Text(LocalizedStringKey(L("Continue"))).font(.headline).frame(maxWidth: .infinity).padding(.vertical, 8)
             }
             .buttonStyle(.borderedProminent)
             .padding(.horizontal, 28)
