@@ -1038,6 +1038,30 @@ static int b_gettimeofday(int64_t *tv, void *tz)
 }
 static int b_nanosleep(const struct timespec *req, struct timespec *rem) { TL_ERRNO_BEGIN(); int r = nanosleep(req, rem); TL_ERRNO_END(); return r; }
 static int b_usleep(unsigned us) { return usleep(us); }
+/* clock_nanosleep: returns the error rather than setting errno; TIMER_ABSTIME (1) sleeps until a time on that clock (Mono's threads sleep this way). */
+static int b_clock_nanosleep(int id, int flags, const struct timespec *req, struct timespec *rem)
+{
+    struct timespec d = *req;
+    if (flags & 1) {
+        struct timespec now; clock_gettime(clock_to_darwin(id), &now);
+        d.tv_sec = req->tv_sec - now.tv_sec; d.tv_nsec = req->tv_nsec - now.tv_nsec;
+        if (d.tv_nsec < 0) { d.tv_nsec += 1000000000L; d.tv_sec--; }
+        if (d.tv_sec < 0) return 0;
+        rem = NULL;
+    }
+    return nanosleep(&d, rem) == 0 ? 0 : (errno == EINTR ? 4 : 22);
+}
+static int b_fstatfs(int fd, guest_statfs *g)
+{
+    struct statfs s;
+    TL_ERRNO_BEGIN(); int r = fstatfs(fd, &s); TL_ERRNO_END();
+    if (r == 0) {
+        memset(g, 0, sizeof(*g));
+        g->f_type = 0xEF53; g->f_bsize = s.f_bsize; g->f_blocks = s.f_blocks; g->f_bfree = s.f_bfree;
+        g->f_bavail = s.f_bavail; g->f_files = s.f_files; g->f_ffree = s.f_ffree; g->f_namelen = 255; g->f_frsize = s.f_bsize;
+    }
+    return r;
+}
 
 /* ---------------------------------------------------------------- signals */
 
@@ -1391,7 +1415,7 @@ const tl_bionic_entry tl_tab_io[] = {
     TL_WRAP("mmap", b_mmap), TL_WRAP("mmap64", b_mmap), TL_WRAP("readdir64", b_readdir), TL_WRAP("munmap", b_munmap), TL_WRAP("mprotect", b_mprotect), TL_WRAP("madvise", b_madvise),
     TL_WRAP("mremap", b_mremap),
     TL_WRAP("clock_gettime", b_clock_gettime), TL_WRAP("clock_getres", b_clock_getres), TL_WRAP("gettimeofday", b_gettimeofday),
-    TL_WRAP("nanosleep", b_nanosleep), TL_WRAP("usleep", b_usleep),
+    TL_WRAP("nanosleep", b_nanosleep), TL_WRAP("clock_nanosleep", b_clock_nanosleep), TL_WRAP("fstatfs", b_fstatfs), TL_WRAP("fstatfs64", b_fstatfs), TL_WRAP("statfs64", b_statfs), TL_WRAP("usleep", b_usleep),
     TL_DIRECT(clock), TL_DIRECT(time), TL_DIRECT(difftime), TL_DIRECT(gmtime), TL_DIRECT(gmtime_r), TL_DIRECT(localtime),
     TL_DIRECT(localtime_r), TL_DIRECT(mktime), TL_DIRECT(strftime), TL_DIRECT(strftime_l), TL_DIRECT(tzset),
     TL_DIRECT(tfind), TL_DIRECT(tsearch), TL_DIRECT(tdelete), TL_DIRECT(twalk), TL_DIRECT(stpcpy),

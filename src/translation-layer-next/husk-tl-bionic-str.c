@@ -603,7 +603,7 @@ const tl_bionic_entry tl_tab_str[] = {
     TL_WRAP("memalign", b_memalign),
     TL_DIRECT(atoi), TL_DIRECT(atol), TL_DIRECT(atoll), TL_DIRECT(bsearch), TL_DIRECT(qsort), TL_DIRECT(div), TL_DIRECT(lldiv),
     TL_DIRECT(rand), TL_DIRECT(srand), TL_DIRECT(srand48), TL_DIRECT(lrand48),
-    TL_WRAP("strtol", b_strtol), TL_WRAP("strtoll", b_strtoll), TL_WRAP("strtoul", b_strtoul), TL_WRAP("strtoull", b_strtoull),
+    TL_WRAP("strtol", b_strtol), TL_WRAP("strtoll", b_strtoll), TL_WRAP("strtoimax", b_strtoll), TL_WRAP("strtoumax", b_strtoull), TL_WRAP("strtoul", b_strtoul), TL_WRAP("strtoull", b_strtoull),
     TL_WRAP("strtoll_l", b_strtoll_l), TL_WRAP("strtoull_l", b_strtoull_l), TL_WRAP("strtod", b_strtod), TL_WRAP("strtof", b_strtof),
     TL_WRAP("strtold", b_strtold), TL_WRAP("strtold_l", b_strtold_l),
     TL_DIRECT(getenv), TL_DIRECT(setenv), TL_DIRECT(unsetenv), TL_DATA("environ", &g_environ_var),

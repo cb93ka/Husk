@@ -1780,6 +1780,37 @@ static tl_lib *map_library(const char *name, uint8_t *file, size_t flen)
 
 /* ------------------------------------------------------------------ loading */
 
+/* Bugs in Android libraries that Android survives only because nothing there ever meets them, fixed in place.
+ *
+ * Mono (.NET 8/9, libmonosgen-2.0.so), method_to_ir, `box` followed by a call: it looks the callee up to see whether it is
+ * object.GetType() and reads its name without checking that the lookup worked. A game whose code calls a method the trimmed
+ * class library no longer has (PvZ Hybrid Remake's Russian translation patches in String.Concat(object, object)) then crashed
+ * the whole process instead of getting a MissingMethodException. The site is found by its instructions:
+ *     bl mini_get_method; mov x22, x0; ldr x0, [x0, #0x18]; adrp x1, "GetType"; add x1, x1, :lo12:; bl strcmp; cbnz w0, skip
+ * and becomes "cbz x0, skip; mov x22, x0; ldr x0, [x22, #0x18]; adr x1, "GetType"; ...". */
+static void fix_known_bugs(tl_lib *L)
+{
+    if (strcmp(base_name(L->name), "libmonosgen-2.0.so")) return;
+    for (int c = 0; c < L->ncode; c++) {
+        for (uint64_t va = L->code[c].start; va + 28 <= L->code[c].end; va += 4) {
+            uint32_t *w = (uint32_t *)at(L, va);
+            if ((w[0] & 0xfc000000u) != 0x94000000u || w[1] != 0xaa0003f6u || w[2] != 0xf9400c00u || (w[3] & 0x9f00001fu) != 0x90000001u ||
+                (w[4] & 0xffc003ffu) != 0x91000021u || (w[5] & 0xfc000000u) != 0x94000000u || (w[6] & 0xff00001fu) != 0x35000000u) continue;
+            uint64_t imm = (uint64_t)(((w[3] >> 5) & 0x7ffff) << 2 | ((w[3] >> 29) & 3));
+            uint64_t page = ((va + 12) & ~(uint64_t)0xfff) + (uint64_t)((int64_t)(imm << 43) >> 31);
+            uint64_t str = page + ((w[4] >> 10) & 0xfff);
+            if (str < L->base_vaddr || str + 8 > L->base_vaddr + L->npages * PAGE || memcmp(at(L, str), "GetType", 8)) continue;
+            int64_t skip = (int64_t)(va + 24) + ((int64_t)((uint64_t)((w[6] >> 5) & 0x7ffff) << 45) >> 43), d_cbz = skip - (int64_t)(va + 4), d_adr = (int64_t)str - (int64_t)(va + 16);
+            if (d_adr < -(1 << 20) || d_adr >= (1 << 20)) { tl_log_line("ld: %s: GetType check found but its string is out of adr range", L->name); continue; }
+            w[1] = 0xb4000000u | ((uint32_t)(d_cbz >> 2) & 0x7ffff) << 5;
+            w[2] = 0xaa0003f6u;
+            w[3] = 0xf9400ec0u;
+            w[4] = 0x10000001u | ((uint32_t)d_adr & 3) << 29 | ((uint32_t)(d_adr >> 2) & 0x7ffff) << 5;
+            tl_log_line("ld: %s: unchecked method lookup before GetType at +%#llx guarded", L->name, (unsigned long long)(va - L->base_vaddr));
+        }
+    }
+}
+
 static bool relocate(tl_lib *L)
 {
     size_t count = 0;
@@ -1804,6 +1835,7 @@ static bool relocate(tl_lib *L)
     }
     size_t t = 0, a = 0, ad = 0, sv = 0;
     patch_image(L, &t, &a, &ad, &sv);
+    fix_known_bugs(L);
     tl_xmem_flush(L->rx, (L->npages + L->nstub) * PAGE);
     L->state = 2;
     if (G.verbosity >= 1) {

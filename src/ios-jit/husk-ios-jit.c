@@ -567,11 +567,28 @@ static HuskDualMapping husk_ios_jit_allocate_real(size_t bytes)
      * involvement, and therefore still available after detach. */
     vm_address_t rw = 0;
     vm_prot_t cur_prot = VM_PROT_NONE, max_prot = VM_PROT_NONE;
-    kern_return_t kr = vm_remap(mach_task_self(), &rw, (vm_size_t)bytes,
-                                /*mask=*/0, VM_FLAGS_ANYWHERE,
-                                mach_task_self(), (vm_address_t)rx,
-                                /*copy=*/FALSE, &cur_prot, &max_prot,
-                                VM_INHERIT_NONE);
+    kern_return_t kr = KERN_NO_SPACE;
+    /* Close to rx: the translation layer's loader retargets code at the writable view with adrp, which reaches
+     * +-4 GiB. Left to place the alias anywhere, the kernel sometimes put it hundreds of GiB away (0x7000000000)
+     * and every Android library then failed to load. Free slots right next to rx are tried first. */
+    for (int k = 1; k <= 6 && kr != KERN_SUCCESS; k++) {
+        for (int sgn = 1; sgn >= -1 && kr != KERN_SUCCESS; sgn -= 2) {
+            intptr_t at = (intptr_t)rx + sgn * k * (intptr_t)bytes;
+            if (at <= 0) continue;
+            rw = (vm_address_t)at;
+            kr = vm_remap(mach_task_self(), &rw, (vm_size_t)bytes, /*mask=*/0, VM_FLAGS_FIXED,
+                          mach_task_self(), (vm_address_t)rx, /*copy=*/FALSE, &cur_prot, &max_prot,
+                          VM_INHERIT_NONE);
+        }
+    }
+    if (kr != KERN_SUCCESS) {
+        rw = 0;
+        kr = vm_remap(mach_task_self(), &rw, (vm_size_t)bytes,
+                      /*mask=*/0, VM_FLAGS_ANYWHERE,
+                      mach_task_self(), (vm_address_t)rx,
+                      /*copy=*/FALSE, &cur_prot, &max_prot,
+                      VM_INHERIT_NONE);
+    }
     if (kr != KERN_SUCCESS) {
         HUSK_LOG("#%llu: vm_remap failed for rx=%p size=%zu: %d (%s)",
                  (unsigned long long)n, rx, bytes, (int)kr, mach_error_string(kr));
