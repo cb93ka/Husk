@@ -35,6 +35,9 @@ static struct {
     jobj *activity, *resources, *assets, *appinfo, *pm, *display, *metrics, *config, *window, *wm, *looper, *handler;
 } H;
 
+void tl_prefs_install(void);
+void tl_prefs_set_data_dir(const char *data);
+
 static jvalue vl(void *p) { jvalue v; v.j = 0; v.l = p; return v; }
 static jvalue vi(int i) { jvalue v; v.j = 0; v.i = i; return v; }
 static jvalue vz(int z) { jvalue v; v.j = 0; v.z = z != 0; return v; }
@@ -140,12 +143,6 @@ extern jobj *tl_loop_main_looper(void);
 static void Context_getMainLooper(tl_jcall *c) { c->ret = vl(tl_loop_main_looper()); }
 static void Context_getContentResolver(tl_jcall *c) { c->ret = vl(make("android/content/ContentResolver")); }
 static void Context_getClassLoader(tl_jcall *c) { c->ret = vl(make("dalvik/system/PathClassLoader")); }
-static void Context_getSharedPreferences(tl_jcall *c)
-{
-    jobj *p = make("android/content/SharedPreferences");
-    set_str(p, "name", S(c->args[0].l));
-    c->ret = vl(p);
-}
 static void Context_checkCallingOrSelfPermission(tl_jcall *c) { c->ret = vi(0); }   /* PERMISSION_GRANTED */
 static void Context_checkSelfPermission(tl_jcall *c) { c->ret = vi(0); }
 
@@ -565,17 +562,8 @@ static void Builder_show(tl_jcall *c)
 static void Object_getClass(tl_jcall *c) { c->ret = vl(c->self && c->self->cls ? tl_jni_class_object(tl_jni_class_name(c->self)) : NULL); }
 static void Class_getClassLoader(tl_jcall *c) { c->ret = vl(make("dalvik/system/PathClassLoader")); }
 static void ClassLoader_findLibrary(tl_jcall *c) { char p[300]; snprintf(p, sizeof(p), "%s/lib%s.so", H.native_lib, S(c->args[0].l)); c->ret = vl(STR(p)); }
-static void SP_getInt(tl_jcall *c) { c->ret = vi(c->args[1].i); }
-static void SP_getString(tl_jcall *c) { c->ret = vl(c->args[1].l ? tl_jni_ref(c->args[1].l) : NULL); }
-static void SP_getBoolean(tl_jcall *c) { c->ret = vz(c->args[1].z); }
 /* Unity's PlayerPrefs.GetFloat: the caller's default, as for the others. Zero instead turned GoreBox's render scale and every
  * slider to their minimum, so the world drew at a few pixels and was stretched to a smear. */
-static void SP_getFloat(tl_jcall *c) { c->ret = vf(c->args[1].f); }
-static void SP_getLong(tl_jcall *c) { c->ret = c->args[1]; }
-static void SP_contains(tl_jcall *c) { c->ret = vz(0); }
-static void SP_edit(tl_jcall *c) { c->ret = vl(make("android/content/SharedPreferences$Editor")); }
-static void Editor_self(tl_jcall *c) { c->ret = vl(tl_jni_ref(c->self)); }
-static void Editor_noop(tl_jcall *c) { (void)c; }
 /* An iterator is empty unless it was made over a list (tl_jni_new_list_iterator). */
 typedef struct { jobj **items; uint32_t n, i; } list_iter;
 static void Iterator_hasNext(tl_jcall *c) { const list_iter *it = c->self ? c->self->native : NULL; c->ret = vz(it && it->i < it->n); }
@@ -958,7 +946,6 @@ static const tl_jhle k_hle[] = {
     M("android/content/Context", "getApplicationContext", "()Landroid/content/Context;", Context_getApplicationContext),
     M("android/content/Context", "getMainLooper", "()Landroid/os/Looper;", Context_getMainLooper),
     M("android/content/Context", "getClassLoader", "()Ljava/lang/ClassLoader;", Context_getClassLoader),
-    M("android/content/Context", "getSharedPreferences", "(Ljava/lang/String;I)Landroid/content/SharedPreferences;", Context_getSharedPreferences),
     M("android/content/Context", "checkCallingOrSelfPermission", "(Ljava/lang/String;)I", Context_checkCallingOrSelfPermission),
     M("android/content/Context", "checkSelfPermission", "(Ljava/lang/String;)I", Context_checkSelfPermission),
     M("android/content/Context", "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", Context_getSystemService),
@@ -1004,19 +991,6 @@ static const tl_jhle k_hle[] = {
     M("android/app/AlertDialog$Builder", "create", "()Landroid/app/AlertDialog;", Builder_create),
     M("android/app/Dialog", "show", "()V", Dialog_show),
     M("android/app/AlertDialog", "show", "()V", Dialog_show),
-    M("android/content/SharedPreferences", "getInt", "(Ljava/lang/String;I)I", SP_getInt),
-    M("android/content/SharedPreferences", "getString", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", SP_getString),
-    M("android/content/SharedPreferences", "getBoolean", "(Ljava/lang/String;Z)Z", SP_getBoolean),
-    M("android/content/SharedPreferences", "getFloat", "(Ljava/lang/String;F)F", SP_getFloat),
-    M("android/content/SharedPreferences", "getLong", "(Ljava/lang/String;J)J", SP_getLong),
-    M("android/content/SharedPreferences", "contains", "(Ljava/lang/String;)Z", SP_contains),
-    M("android/content/SharedPreferences$Editor", "putFloat", "(Ljava/lang/String;F)Landroid/content/SharedPreferences$Editor;", Editor_self),
-    M("android/content/SharedPreferences$Editor", "putLong", "(Ljava/lang/String;J)Landroid/content/SharedPreferences$Editor;", Editor_self),
-    M("android/content/SharedPreferences", "edit", "()Landroid/content/SharedPreferences$Editor;", SP_edit),
-    M("android/content/SharedPreferences$Editor", "putInt", "(Ljava/lang/String;I)Landroid/content/SharedPreferences$Editor;", Editor_self),
-    M("android/content/SharedPreferences$Editor", "putString", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/SharedPreferences$Editor;", Editor_self),
-    M("android/content/SharedPreferences$Editor", "putBoolean", "(Ljava/lang/String;Z)Landroid/content/SharedPreferences$Editor;", Editor_self),
-    M("android/content/SharedPreferences$Editor", "apply", "()V", Editor_noop),
     M("java/util/Iterator", "hasNext", "()Z", Iterator_hasNext), M("java/util/Iterator", "next", "()Ljava/lang/Object;", Iterator_next),
     M("java/lang/String", "<init>", "()V", String_init_empty), M("java/lang/String", "<init>", "([B)V", String_init_bytes),
     M("java/lang/String", "<init>", "([BLjava/lang/String;)V", String_init_bytes), M("java/lang/String", "<init>", "([BII)V", String_init_bytes_range),
@@ -1079,6 +1053,7 @@ void tl_hle_configure(const char *pkg, const char *apk, const char *data, int w,
     snprintf(H.pkg, sizeof(H.pkg), "%s", pkg);
     snprintf(H.apk, sizeof(H.apk), "%s", apk);
     snprintf(H.data, sizeof(H.data), "%s", data);
+    tl_prefs_set_data_dir(data);
     snprintf(H.files, sizeof(H.files), "%s/files", data);
     snprintf(H.cache, sizeof(H.cache), "%s/cache", data);
     snprintf(H.ext_files, sizeof(H.ext_files), "%s/sdcard/Android/data/%s/files", data, pkg);
@@ -1114,6 +1089,7 @@ void tl_jni_hle_install(void)
     tl_tls_install();
     tl_crypto_install();
     tl_swappy_install();
+    tl_prefs_install();
     tl_http_install();
     tl_gms_install();
 
