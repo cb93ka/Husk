@@ -1879,6 +1879,7 @@ static tl_lib *load_locked(const char *name, int depth)
         return NULL;
     }
     { char e[160] = ""; if (!tl_xmem_open(768u << 20, e, sizeof(e))) { tl_log_line("ld: %s", e); free(file); return NULL; } }
+    { void tl_progress(const char *stage, double fraction); char st[160]; snprintf(st, sizeof(st), "Loading %s", base_name(name)); tl_progress(st, -1); }
     {   /* adrp, which the loader uses to retarget code at the writable view, reaches +-4 GiB. */
         ptrdiff_t d = tl_xmem_delta();
         if (d > ((ptrdiff_t)3 << 30) || d < -((ptrdiff_t)3 << 30)) { tl_log_line("ld: the writable and executable views are %td MiB apart: too far for adrp", d >> 20); free(file); return NULL; }

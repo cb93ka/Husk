@@ -151,6 +151,15 @@ static void install_crash_reporter(void)
 
 /* ------------------------------------------------------------------- launch */
 
+/* The game quit by itself, for the engines that can tell. */
+static bool engine_ended(void)
+{
+    return (A.engine == ENGINE_COCOS && tl_cocos_ended())
+        || (A.engine == ENGINE_GODOT && tl_godot_ended())
+        || (A.engine == ENGINE_GAMEMAKER && tl_gm_ended())
+        || (A.engine == ENGINE_JAVA && tl_javaapp_ended()) || (A.engine == ENGINE_UNITY && tl_unity_ended()) || (A.engine == ENGINE_SDL && tl_sdl_ended());
+}
+
 /* exit() from the game ends the game, and the thread that asked. */
 static void guest_exit(int status)
 {
@@ -184,7 +193,7 @@ static void *heartbeat_thread(void *arg)
               tl_log_line("unity: a variadic shim's implementation (%s) changed callee-saved registers (%llu times; x21 then %#llx, diff mask %#llx)",
                           nm, (unsigned long long)seen, (unsigned long long)tl_va_clobber.x21, (unsigned long long)tl_va_clobber.mask);
           } }
-        if ((A.engine == ENGINE_COCOS && tl_cocos_ended()) || (A.engine == ENGINE_GODOT && tl_godot_ended()) || (A.engine == ENGINE_GAMEMAKER && tl_gm_ended()) || (A.engine == ENGINE_JAVA && tl_javaapp_ended())) atomic_store(&A.state, HUSK_UNITY_ENDED);
+        if (engine_ended()) atomic_store(&A.state, HUSK_UNITY_ENDED);
         if (atomic_load(&A.state) == HUSK_UNITY_ENDED || atomic_load(&A.state) == HUSK_UNITY_FAILED) return NULL;
     }
 }
@@ -615,7 +624,7 @@ const char *husk_native_loaded_apk(void) { return atomic_load(&A.state) == HUSK_
 
 int husk_unity_state(void)
 {
-    if (atomic_load(&A.state) == HUSK_UNITY_RUNNING && ((A.engine == ENGINE_COCOS && tl_cocos_ended()) || (A.engine == ENGINE_GODOT && tl_godot_ended()) || (A.engine == ENGINE_GAMEMAKER && tl_gm_ended()) || (A.engine == ENGINE_JAVA && tl_javaapp_ended()))) atomic_store(&A.state, HUSK_UNITY_ENDED);
+    if (atomic_load(&A.state) == HUSK_UNITY_RUNNING && engine_ended()) atomic_store(&A.state, HUSK_UNITY_ENDED);
     return atomic_load(&A.state);
 }
 static unsigned long engine_frames(void)

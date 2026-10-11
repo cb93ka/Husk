@@ -113,7 +113,8 @@ struct GamePage: View {
 
     private var subtitle: String {
         if let used = LibraryItem.game(app).usedText { return used }
-        return runs ? "Ready to play" : "May not run on this iPhone"
+        let c = app.compatibility
+        return c.kind == .unsupported ? c.title : runs ? "Ready to play" : "May not run on this iPhone"
     }
 
     var body: some View {
@@ -133,6 +134,10 @@ struct GamePage: View {
                 }
             }
             .heroRow()
+
+            if !isGeodeLauncher {
+                Section("Compatibility") { CompatibilityRow(compat: app.compatibility) }
+            }
 
             if !ShowcaseStore.shared.pictures(for: app.packageName).isEmpty {
                 Section("Screenshots") {

@@ -37,6 +37,8 @@ bool tl_unity_run(void);
 
 /* Frames rendered so far. */
 unsigned long tl_unity_frames(void);
+/* The game quit by itself (Application.Quit: the player render loop ended). */
+bool tl_unity_ended(void);
 
 /*
  * A touch, in screen pixels with y down. phase 0 begins it, 1 moves it, 2 ends it (3 cancels all).

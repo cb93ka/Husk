@@ -32,6 +32,7 @@ static struct {
     atomic_ulong frames;
     atomic_bool stop;
     atomic_bool paused;
+    atomic_bool ended;       /* nativeRender said to stop: the game quit */
     atomic_ullong perf_ns, perf_max_ns;     /* time inside nativeRender since the last snapshot, and the worst call */
     atomic_ulong perf_frames;
     struct timespec perf_since;
@@ -245,7 +246,7 @@ static void *unity_main(void *arg)
             while (ns > m && !atomic_compare_exchange_weak(&U.perf_max_ns, &m, ns)) {}
         }
         atomic_fetch_add(&U.frames, 1);
-        if (!keep) { tl_log_line("unity: nativeRender returned false: the engine asked to quit"); break; }
+        if (!keep) { tl_log_line("unity: nativeRender returned false: the engine asked to quit"); atomic_store(&U.ended, true); break; }
         usleep(2000);
     }
     return NULL;
@@ -387,6 +388,7 @@ void tl_unity_perf_snapshot(tl_unity_perf *out)
 void tl_unity_set_paused(bool paused) { atomic_store(&U.paused, paused); }
 
 unsigned long tl_unity_frames(void) { return atomic_load(&U.frames); }
+bool tl_unity_ended(void) { return atomic_load(&U.ended); }
 void tl_unity_poke(int signo) { if (U.thread_started) pthread_kill(U.thread, signo); }
 
 void tl_unity_stop(void)

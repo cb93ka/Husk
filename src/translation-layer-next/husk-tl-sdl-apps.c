@@ -159,6 +159,8 @@ static void luajit_openlibs(void *L)
  * server browser is the way online.
  */
 static bool g_xash;
+void tl_progress(const char *stage, double fraction);
+static size_t g_unpack_done, g_unpack_total;
 
 static void mkdirs_to(char *path)
 {
@@ -183,6 +185,7 @@ static long unpack(const tl_zip *z, const char *prefix, const char *out)
         if (owned) free((void *)d);
         if (!ok || rename(tmp, path)) { tl_log_line("xash: cannot write %s", path); unlink(tmp); return -1; }
         n++;
+        if (g_unpack_total && ++g_unpack_done % 16 == 0) tl_progress("Unpacking the game's data (first start only)", (double)g_unpack_done / g_unpack_total);
     }
     return n;
 }
@@ -198,6 +201,7 @@ static bool mobsik_unpack(const char *apk, const char *base)
     bool ok = false;
     if (data) {
         tl_log_line("xash: unpacking the game (%.0f MB) into %s -- the first start takes a while", data->usize / 1048576.0, base);
+        tl_progress("Unpacking the game's data (first start only)", 0);
         char inner[800]; snprintf(inner, sizeof(inner), "%s.zip.part", base);
         const uint8_t *d; size_t len; bool owned;
         mkdirs_to(inner);
@@ -210,6 +214,8 @@ static bool mobsik_unpack(const char *apk, const char *base)
         }
         tl_zip iz;
         if (ok && tl_zip_open(&iz, inner, err, sizeof(err))) {
+            g_unpack_done = 0; g_unpack_total = iz.count;
+            for (size_t i = 0; i < z.count; i++) if (!strncmp(z.entries[i].name, "assets/bundled-maps/", 20)) g_unpack_total++;
             long a = unpack(&iz, "", base);
             tl_zip_close(&iz);
             long b = a >= 0 ? unpack(&z, "assets/bundled-maps/", base) : -1;
@@ -217,6 +223,8 @@ static bool mobsik_unpack(const char *apk, const char *base)
             tl_log_line("xash: unpacked %ld game files and %ld bundled map files", a, b);
         } else ok = false;
         unlink(inner);
+        g_unpack_total = 0;
+        tl_progress("Starting the engine", -1);
     }
     tl_zip_close(&z);
     if (ok) { FILE *f = fopen(stamp, "w"); if (f) fclose(f); }

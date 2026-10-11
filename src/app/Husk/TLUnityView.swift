@@ -640,6 +640,9 @@ final class TLUnityModel: ObservableObject {
     @Published var state: Int32 = 0
     @Published var frames: UInt = 0
     @Published var logText = ""
+    /// What the start is busy with, and how far along (0...1, or -1 when there is no telling): for the loading screen.
+    @Published var stage = ""
+    @Published var fraction: Double = -1
     private var timer: Timer?
     private var ticks = 0
 
@@ -656,6 +659,13 @@ final class TLUnityModel: ObservableObject {
         ticks += 1
         state = husk_unity_state()
         frames = husk_unity_frames()
+        if state != Int32(HUSK_UNITY_RUNNING) || frames < 2 {
+            var buf = [CChar](repeating: 0, count: 200)
+            let f = husk_tl_progress(&buf, UInt(buf.count))
+            let s = String(cString: buf)
+            if s != stage { stage = s }
+            if abs(f - fraction) > 0.004 { fraction = f }
+        }
         if ticks % 4 == 0, let c = husk_tl_attempt_log() {
             let text = String(cString: c)
             free(c)
@@ -713,6 +723,10 @@ struct TLCocosAttemptView: View {
     @State private var uiHidden: Bool
     /// The line saying how to get the interface back, shown for a few seconds after it goes.
     @State private var hint = false
+    /// The game has drawn: the loading screen is gone.
+    @State private var ready = false
+    /// The game quit by itself and its screen is on its way out.
+    @State private var closing = false
     private var showLog: Bool { get { showLogSetting && devInfo } nonmutating set { showLogSetting = newValue } }
 
     init(app: TLApp) {
@@ -784,7 +798,14 @@ struct TLCocosAttemptView: View {
                     .ignoresSafeArea()
                 }
             }
-            if !uiHidden {
+            .scaleEffect(closing ? 0.88 : 1)
+            .opacity(closing ? 0 : 1)
+            if !ready && blockedBy == nil {
+                LaunchCurtain(app: app, model: model, onClose: { dismiss() })
+                    .transition(.opacity)
+                    .zIndex(5)
+            }
+            if !uiHidden && (ready || blockedBy != nil) && !closing {
                 VStack(spacing: 0) {
                     bar
                     if showLog {
@@ -827,9 +848,15 @@ struct TLCocosAttemptView: View {
         // What happened, for the library: ten seconds of frames is a game that plays; a refusal is one that did not start.
         .onChange(of: model.frames) { f in
             if f > 600, model.state == Int32(HUSK_UNITY_RUNNING) { GameStatusStore.shared.record(app.id, .plays) }
+            if !ready, f >= 2, model.state == Int32(HUSK_UNITY_RUNNING) { withAnimation(.easeOut(duration: 0.45)) { ready = true } }
         }
         .onChange(of: model.state) { st in
             if st == Int32(HUSK_UNITY_FAILED) { GameStatusStore.shared.record(app.id, .failed) }
+            // Quitting from the game's own menu: rather than leave its last frame standing, the game shrinks away and Husk is back.
+            if st == Int32(HUSK_UNITY_ENDED), ready, !closing {
+                withAnimation(.easeIn(duration: 0.35)) { closing = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { dismiss() }
+            }
         }
         .onDisappear {
             CrashReport.gameEnded()

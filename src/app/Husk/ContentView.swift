@@ -147,6 +147,19 @@ struct ContentView: View {
             Text("You have \(AppUpdates.current). The new version's IPA is on its release page.")
         }
         .task { await updates.check() }
+        // An APK just added: whether it will run, said at once rather than found out at the first start.
+        .alert(tlStore.justAdded.map { "\($0.label) Added" } ?? "", isPresented: Binding(
+            get: { tlStore.justAdded != nil }, set: { if !$0 { tlStore.justAdded = nil } })) {
+            Button("OK", role: .cancel) { tlStore.justAdded = nil }
+        } message: {
+            if let app = tlStore.justAdded { let c = app.compatibility; Text("\(c.title)\n\n\(c.detail)") }
+        }
+        .alert("Could Not Add the APK", isPresented: Binding(
+            get: { tlStore.lastError != nil }, set: { if !$0 { tlStore.lastError = nil } })) {
+            Button("OK", role: .cancel) { tlStore.lastError = nil }
+        } message: {
+            Text(tlStore.lastError ?? "")
+        }
         .sheet(isPresented: $router.showFiles) { FilesTab() }
         .sheet(isPresented: $router.showDownloads) { DownloadsTab() }
         // Pictures for the apps here: read the index on launch and whenever the set of apps changes.

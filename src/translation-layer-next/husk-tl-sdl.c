@@ -789,6 +789,8 @@ bool tl_sdl_start(const tl_ga_config *cfg, const char *activity_class)
 }
 
 static char g_sdl_args[1024], g_sdl_default_args[512];
+static atomic_bool g_sdl_ended;
+bool tl_sdl_ended(void) { return atomic_load(&g_sdl_ended); }
 void tl_sdl_set_arguments(const char *args) { snprintf(g_sdl_args, sizeof(g_sdl_args), "%s", args ? args : ""); }
 /* What the game's own activity passes when the player set none (a launcher's fixed arguments). */
 void tl_sdl_set_default_arguments(const char *args) { snprintf(g_sdl_default_args, sizeof(g_sdl_default_args), "%s", args ? args : ""); }
@@ -815,6 +817,7 @@ static void *sdl_main_thread(void *arg)
     if (argc) { char shown[sizeof(g_sdl_args)] = ""; for (int i = 0; i < argc; i++) { strlcat(shown, i ? " " : "", sizeof(shown)); strlcat(shown, argv[i], sizeof(shown)); } tl_log_line("sdl: launch arguments: %s", shown); }
     int r = run_main(env, cls, tl_jni_new_string(S.main_lib[0] ? S.main_lib : "libmain.so"), tl_jni_new_string(S.main_fn[0] ? S.main_fn : "SDL_main"), jargs);
     tl_log_line("sdl: SDL_main returned %d", r);
+    atomic_store(&g_sdl_ended, true);
     if (cleanup) cleanup(env, cls);
     return NULL;
 }

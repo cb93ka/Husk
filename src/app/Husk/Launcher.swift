@@ -641,7 +641,8 @@ struct LibraryScreen: View {
         switch item {
         case .game(let g):
             if g.packageName == GeodeSupport.launcherPackage { return "Geode" }
-            return g.report?.canRun == true ? nil : "May not run"
+            let c = g.compatibility
+            return c.kind == .unsupported ? c.short : nil
         case .android:
             if AndroidHost.shared.isReady { return "Running" }
             return guest.state == .ready ? nil : "Not installed"

@@ -172,6 +172,8 @@ final class TranslationLayerStore: ObservableObject {
     @Published private(set) var checks: [TLCheck] = []
     @Published private(set) var checking = false
     @Published var lastError: String?
+    /// The app just added, for the note that says whether it will run.
+    @Published var justAdded: TLApp?
 
     private init() { reload() }
 
@@ -261,12 +263,14 @@ final class TranslationLayerStore: ObservableObject {
         guard !urls.isEmpty, busy == nil else { return }
         busy = urls.count == 1 ? "Adding \(urls[0].lastPathComponent)…"
                                : "Adding \(urls.count) APKs…"
+        let before = Set(apps.map(\.id))
         Task.detached(priority: .userInitiated) {
             let failure = Self.ingest(urls, move: move)
             await MainActor.run {
                 self.busy = nil
                 self.lastError = failure
                 self.reload()
+                if failure == nil, let new = self.apps.first(where: { !before.contains($0.id) }) { self.justAdded = new }
                 if failure == nil, move { self.adoptDroppedAPKs() }      // the next one waiting, if several were put there
             }
         }

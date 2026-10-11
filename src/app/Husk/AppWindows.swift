@@ -150,6 +150,8 @@ private struct AppWindow: View {
         }
         .onChange(of: model.state) { st in
             if st == Int32(HUSK_UNITY_FAILED) { GameStatusStore.shared.record(app.id, .failed) }
+            // The game quit from its own menu: the window goes (shrinking away) instead of keeping the last frame.
+            if st == Int32(HUSK_UNITY_ENDED), model.frames >= 2 { withAnimation(.easeIn(duration: 0.3)) { windows.close() } }
         }
         .onReceive(NotificationCenter.default.publisher(for: TLUnityUIView.appClosedItself)) { _ in windows.close() }
         .onReceive(NotificationCenter.default.publisher(for: WebAppRuntime.closed)) { n in
@@ -174,18 +176,12 @@ private struct AppWindow: View {
                            engine: app.screenEngine, portrait: portrait, scale: settings.resolution.scale,
                            renderer: settings.renderer.code)
                 .overlay {
-                    if model.frames == 0 {
-                        VStack(spacing: 10) {
-                            if model.state == Int32(HUSK_UNITY_FAILED) || model.state == Int32(HUSK_UNITY_ENDED) {
-                                Text(model.statusText).font(.subheadline.weight(.semibold)).foregroundStyle(.white)
-                            } else {
-                                ProgressView().tint(.white)
-                                Text("Starting \(app.label)…").font(.caption).foregroundStyle(.white.opacity(0.7))
-                            }
-                        }
-                        .allowsHitTesting(false)
+                    if model.frames < 2 || model.state != Int32(HUSK_UNITY_RUNNING) && model.state != Int32(HUSK_UNITY_ENDED) {
+                        LaunchCurtain(app: app, model: model, onClose: { windows.close() })
+                            .transition(.opacity)
                     }
                 }
+                .animation(.easeOut(duration: 0.4), value: model.frames >= 2)
         }
     }
 

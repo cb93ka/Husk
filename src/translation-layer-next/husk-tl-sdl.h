@@ -47,6 +47,8 @@ void tl_sdl_key(int android_keycode, bool down);
 /* The screen's safe-area insets (a notch, rounded corners) in surface pixels, as the activity would report them from its display cutout. */
 void tl_sdl_set_safe_insets(int left, int top, int right, int bottom);
 unsigned long tl_sdl_frames(void);
+/* SDL_main returned: the game quit by itself. */
+bool tl_sdl_ended(void);
 
 #ifdef __cplusplus
 }

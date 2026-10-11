@@ -16,6 +16,9 @@
 extern "C" {
 #endif
 
+/* What the start is doing now, for a loading screen: the stage in words into `out`; returns how far along, 0..1, or -1 when unknown. */
+double husk_tl_progress(char *out, unsigned long cap);
+
 enum { HUSK_UNITY_IDLE = 0, HUSK_UNITY_STARTING = 1, HUSK_UNITY_RUNNING = 2, HUSK_UNITY_FAILED = 3, HUSK_UNITY_ENDED = 4 };
 
 /*
