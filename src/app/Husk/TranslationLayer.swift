@@ -63,7 +63,8 @@ extension TLReport {
         if engine == "SDL" || engine == "Python" { return .sdl }
         if engine == "Unreal Engine" { return .ue4 }
         if engine == "Rockstar" { return .gta }
-        if engine == "Godot" { return .godot }
+        // A Godot .NET game carries Mono as well; reports made before the scan knew that called it .NET.
+        if engine == "Godot" || libraries.contains(where: { $0.name == "libgodot_android.so" }) { return .godot }
         if engine == "NativeActivity" { return .nativeactivity }
         if engine == "Flutter" { return .flutter }
         if engine == "GameMaker" { return .gamemaker }

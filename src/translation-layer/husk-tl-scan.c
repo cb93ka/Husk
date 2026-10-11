@@ -105,8 +105,9 @@ static const char *engine_name(const engine_scan *s)
     if (s->capacitor) return "Capacitor";
     if (s->cordova) return "Cordova";
     if (s->react) return "React Native";
-    if (s->dotnet) return ".NET / Xamarin";
+    /* Godot's .NET build carries Mono too: the engine is Godot's, which runs the C# itself. */
     if (s->godot) return "Godot";
+    if (s->dotnet) return ".NET / Xamarin";
     if (s->unreal) return "Unreal Engine";
     if (s->cocos) return "Cocos";
     if (s->minecraft) return "Minecraft";
