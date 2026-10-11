@@ -432,14 +432,19 @@ static bool real_dev_ext(void *pd, const char *name)
 static int w_vkEnumerateDeviceExtensionProperties(void *pd, const char *layer, uint32_t *count, vk_ext_props *props)
 {
     if (!g_real_enum_dev_ext) return -3;
-    if (layer || !dxvk_game()) return g_real_enum_dev_ext(pd, layer, count, props);
+    if (layer) return g_real_enum_dev_ext(pd, layer, count, props);
     uint32_t n = 0;
     int r = g_real_enum_dev_ext(pd, NULL, &n, NULL);
     if (r != VK_SUCCESS) return r;
     vk_ext_props *all = calloc(n + N_FAKE_EXT + 1, sizeof(*all));
     g_real_enum_dev_ext(pd, NULL, &n, all);
-    uint32_t total = n;
-    for (size_t i = 0; i < N_FAKE_EXT; i++) {
+    /* VK_GOOGLE_display_timing is hidden. Swappy (Unity 2022's frame pacer) paces by it: it reads back when frames were shown,
+     * and MoltenVK reports that on Metal's media clock, not the CLOCK_MONOTONIC Swappy counts on, so every frame looked late and
+     * Swappy settled on a swap interval of 4 -- a steady 15-16 fps (PvZ Fusion). Without the extension Swappy presents as frames come. */
+    uint32_t total = 0;
+    for (uint32_t j = 0; j < n; j++) if (strcmp(all[j].name, "VK_GOOGLE_display_timing")) all[total++] = all[j];
+    n = total;
+    for (size_t i = 0; dxvk_game() && i < N_FAKE_EXT; i++) {
         bool have = false;
         for (uint32_t j = 0; j < n; j++) if (!strcmp(all[j].name, k_fake_ext[i].name)) have = true;
         if (!have) { snprintf(all[total].name, sizeof(all[total].name), "%s", k_fake_ext[i].name); all[total].specVersion = 1; total++; }
