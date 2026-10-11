@@ -8,7 +8,7 @@ public class PackageItemInfo {
     public PackageItemInfo(PackageItemInfo o) { name = o.name; packageName = o.packageName; labelRes = o.labelRes; icon = o.icon; metaData = o.metaData; nonLocalizedLabel = o.nonLocalizedLabel; }
     public CharSequence loadLabel(PackageManager pm) {
         if (nonLocalizedLabel != null) return nonLocalizedLabel;
-        if (labelRes != 0) { try { return husk.ContextImpl.app().getResources().getText(labelRes); } catch (Exception e) {} }
+        if (labelRes != 0) { try { return husk.ContextImpl.app().getResources().getText(labelRes); } catch (Exception e) { android.util.Log.w("Husk", "label " + Integer.toHexString(labelRes) + " of " + packageName + ": " + e); } }
         return name != null ? name : packageName;
     }
     public android.graphics.drawable.Drawable loadIcon(PackageManager pm) { try { return icon != 0 ? husk.ContextImpl.app().getResources().getDrawable(icon) : null; } catch (Exception e) { return null; } }

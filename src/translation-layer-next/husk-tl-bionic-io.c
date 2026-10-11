@@ -486,6 +486,26 @@ static bool net_trace_fd(int fd);
 static int g_evfd_peer[1024];
 void tl_eventfd_register(int rd, int wr) { if (rd >= 0 && rd < 1024) g_evfd_peer[rd] = wr + 1; }
 static int evfd_peer(int fd) { return fd >= 0 && fd < 1024 ? g_evfd_peer[fd] - 1 : -1; }
+/* eventfd_write/eventfd_read (Qt's event loop wakes itself with them): a count into the pipe; reading takes everything there. */
+static int b_eventfd_write(int fd, uint64_t v)
+{
+    int w = evfd_peer(fd) >= 0 ? evfd_peer(fd) : fd;
+    if (write(w, &v, sizeof(v)) == sizeof(v) || errno == EAGAIN) return 0;
+    tl_set_guest_errno(tl_errno_to_guest(errno)); return -1;
+}
+static int b_eventfd_read(int fd, uint64_t *out)
+{
+    uint64_t sum = 0, v; ssize_t n; bool got = false;
+    int fl = fcntl(fd, F_GETFL);
+    while ((n = read(fd, &v, sizeof(v))) == sizeof(v)) {
+        sum += v; got = true;
+        if (!(fl & O_NONBLOCK)) { fcntl(fd, F_SETFL, fl | O_NONBLOCK); fl |= 0x40000000; }
+    }
+    if (fl & 0x40000000) fcntl(fd, F_SETFL, fl & ~0x40000000);
+    if (!got) { tl_set_guest_errno(11 /* EAGAIN */); return -1; }
+    if (out) *out = sum;
+    return 0;
+}
 static int b_close(int fd) { if (evfd_peer(fd) >= 0) { close(evfd_peer(fd)); g_evfd_peer[fd] = 0; } if (vfd_is(fd)) g_vfd[fd].on = false; bool sock = net_trace_fd(fd); TL_ERRNO_BEGIN(); int r = close(fd); tl_atomic_closed(fd); TL_ERRNO_END(); if (sock) tl_log_line("net: close(fd %d)", fd); return r; }
 /* close() as the guest calls it (for other shims that close on its behalf: fdsan's close_with_tag) */
 int tl_guest_close(int fd) { return b_close(fd); }
@@ -1231,24 +1251,34 @@ static void fut_unlink(size_t h, fut_waiter *w)
     if (g_fut[h].tail == w) g_fut[h].tail = prev;
 }
 
-static long futex_call(uint32_t *addr, int op, uint32_t val, const struct timespec *to, uint32_t bitset_val)
+/* Wake up to n waiters on addr; the caller holds addr's bucket. */
+static long fut_wake_locked(size_t h, uint32_t *addr, long n)
 {
-    (void)bitset_val;
+    long woken = 0;
+    fut_waiter *w = g_fut[h].head, *next;
+    for (; w && woken < n; w = next) {
+        next = w->next;
+        if (w->addr != addr) continue;
+        fut_unlink(h, w);
+        w->woken = true;
+        pthread_cond_signal(&w->cv);
+        woken++;
+    }
+    return woken;
+}
+
+/* Two buckets locked in a fixed order (once if they are the same). */
+static void fut_lock2(size_t a, size_t b) { if (a == b) pthread_mutex_lock(&g_fut[a].m); else if (a < b) { pthread_mutex_lock(&g_fut[a].m); pthread_mutex_lock(&g_fut[b].m); } else { pthread_mutex_lock(&g_fut[b].m); pthread_mutex_lock(&g_fut[a].m); } }
+static void fut_unlock2(size_t a, size_t b) { pthread_mutex_unlock(&g_fut[a].m); if (a != b) pthread_mutex_unlock(&g_fut[b].m); }
+
+static long futex_call(uint32_t *addr, int op, uint32_t val, const struct timespec *to, uint32_t *addr2, uint32_t val3)
+{
     int cmd = op & 127;
     if (g_futex_trace < 0) g_futex_trace = getenv("TL_FUTEX_TRACE") ? 1 : 0;
     size_t h = ((uintptr_t)addr >> 2) % FUT_BUCKETS;
     if (cmd == 1 || cmd == 10) {                                  /* FUTEX_WAKE / WAKE_BITSET */
-        long woken = 0;
         pthread_mutex_lock(&g_fut[h].m);
-        fut_waiter *w = g_fut[h].head, *next;
-        for (; w && woken < (long)(int32_t)val; w = next) {
-            next = w->next;
-            if (w->addr != addr) continue;
-            fut_unlink(h, w);
-            w->woken = true;
-            pthread_cond_signal(&w->cv);
-            woken++;
-        }
+        long woken = fut_wake_locked(h, addr, (long)(int32_t)val);
         pthread_mutex_unlock(&g_fut[h].m);
         if (g_futex_trace) { char nm[32] = ""; pthread_getname_np(pthread_self(), nm, sizeof(nm)); tl_log_line("futex[%s]: WAKE addr=%p n=%d woke %ld", nm, (void *)addr, (int)val, woken); }
         return woken;
@@ -1281,6 +1311,68 @@ static long futex_call(uint32_t *addr, int op, uint32_t val, const struct timesp
         pthread_cond_destroy(&me.cv);
         return r;
     }
+    /*
+     * FUTEX_WAKE_OP (5): change *addr2 by an operation, wake val waiters on addr, and if the old *addr2 passes a comparison, also
+     * wake val2 (passed where the timeout goes) on addr2. Qt's QSemaphore releases this way; without it the release's wake was lost
+     * and a thread waiting on the semaphore (QImage's threaded conversion, waiting for its pool) slept for ever.
+     */
+    if (cmd == 5) {
+        long val2 = (long)(uintptr_t)to;
+        int wop = (int)((val3 >> 28) & 0xf), wcmp = (int)((val3 >> 24) & 0xf);
+        int32_t oparg = (int32_t)((val3 >> 12) & 0xfff), cmparg = (int32_t)(val3 & 0xfff);
+        if (oparg & 0x800) oparg -= 0x1000;
+        if (cmparg & 0x800) cmparg -= 0x1000;
+        if (wop & 8) { wop &= 7; oparg = 1 << (oparg & 31); }
+        size_t h2 = ((uintptr_t)addr2 >> 2) % FUT_BUCKETS;
+        fut_lock2(h, h2);
+        uint32_t old = __atomic_load_n(addr2, __ATOMIC_SEQ_CST), nv;
+        do {
+            switch (wop) {
+            case 0: nv = (uint32_t)oparg; break;
+            case 1: nv = old + (uint32_t)oparg; break;
+            case 2: nv = old | (uint32_t)oparg; break;
+            case 3: nv = old & ~(uint32_t)oparg; break;
+            case 4: nv = old ^ (uint32_t)oparg; break;
+            default: fut_unlock2(h, h2); return -38;
+            }
+        } while (!__atomic_compare_exchange_n(addr2, &old, nv, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST));
+        long woken = fut_wake_locked(h, addr, (long)(int32_t)val);
+        int32_t o = (int32_t)old; bool hit;
+        switch (wcmp) {
+        case 0: hit = o == cmparg; break;
+        case 1: hit = o != cmparg; break;
+        case 2: hit = o < cmparg; break;
+        case 3: hit = o <= cmparg; break;
+        case 4: hit = o > cmparg; break;
+        case 5: hit = o >= cmparg; break;
+        default: hit = false;
+        }
+        if (hit) woken += fut_wake_locked(h2, addr2, val2);
+        fut_unlock2(h, h2);
+        if (g_futex_trace) tl_log_line("futex: WAKE_OP addr=%p addr2=%p old=%#x woke %ld", (void *)addr, (void *)addr2, old, woken);
+        return woken;
+    }
+    /* FUTEX_REQUEUE (3) / FUTEX_CMP_REQUEUE (4): wake val on addr and move up to val2 more waiters to addr2. */
+    if (cmd == 3 || cmd == 4) {
+        long val2 = (long)(uintptr_t)to;
+        size_t h2 = ((uintptr_t)addr2 >> 2) % FUT_BUCKETS;
+        fut_lock2(h, h2);
+        if (cmd == 4 && __atomic_load_n(addr, __ATOMIC_SEQ_CST) != val3) { fut_unlock2(h, h2); return -11; }
+        long woken = fut_wake_locked(h, addr, (long)(int32_t)val), moved = 0;
+        /* A moved waiter keeps its condition variable and bucket mutex only when the bucket is the same; otherwise it is woken (a
+         * spurious wake, which futex users must tolerate) rather than moved. */
+        fut_waiter *w = g_fut[h].head, *next;
+        for (; w && moved < val2; w = next) {
+            next = w->next;
+            if (w->addr != addr) continue;
+            if (h == h2) w->addr = addr2;
+            else { fut_unlink(h, w); w->woken = true; pthread_cond_signal(&w->cv); }
+            moved++;
+        }
+        fut_unlock2(h, h2);
+        return woken + moved;
+    }
+    { char note[64]; snprintf(note, sizeof(note), "futex operation %d is not provided", cmd); tl_note_once(note); }
     return -38;
 }
 
@@ -1302,7 +1394,7 @@ static long linux_syscall_impl(long a0, long a1, long a2, long a3, long a4, long
     case 173: return getppid();
     case 174: case 175: return getuid();
     case 176: case 177: return getgid();
-    case 98:  return futex_call((uint32_t *)a0, (int)a1, (uint32_t)a2, (const struct timespec *)a3, (uint32_t)a5);
+    case 98:  return futex_call((uint32_t *)a0, (int)a1, (uint32_t)a2, (const struct timespec *)a3, (uint32_t *)a4, (uint32_t)a5);
     case 129: case 130: case 131: {                                                     /* kill, tkill, tgkill */
         int sig = nr == 131 ? (int)a2 : (int)a1;
         if (sig == 0) return 0;
@@ -1368,6 +1460,17 @@ static int b_poll(struct pollfd *fds, unsigned long n, int timeout)
         if (net_trace_fd(fds[i].fd)) { tl_log_line("net: poll(%lu fds, fd[%lu] %d ev %#x, timeout %d) -> %d rev %#x", n, i, fds[i].fd, fds[i].events, timeout, r, r > 0 ? fds[i].revents : 0); break; }
     return r;
 }
+/* ppoll: poll with a timespec (and a signal mask, which nothing here needs). */
+static int b_ppoll(struct pollfd *fds, unsigned long n, const struct timespec *ts, const void *mask)
+{
+    (void)mask;
+    int ms = ts ? (int)(ts->tv_sec * 1000 + (ts->tv_nsec + 999999) / 1000000) : -1;
+    return b_poll(fds, n, ms);
+}
+/* nl_langinfo: bionic's is "UTF-8" for CODESET (14) and "" otherwise -- never NULL, which Qt's locale setup reads without checking. */
+static const char *b_nl_langinfo(int item) { return item == 14 ? "UTF-8" : ""; }
+static int b_getentropy(void *buf, size_t n) { if (n > 256) { tl_set_guest_errno(5 /* EIO */); return -1; } arc4random_buf(buf, n); return 0; }
+static void *b_memmem(const void *h, size_t hl, const void *n, size_t nl) { return memmem(h, hl, n, nl); }
 static int b_select(int n, fd_set *r, fd_set *w, fd_set *e, struct timeval *tv)
 {
     TL_ERRNO_BEGIN(); int x = select(n, r, w, e, tv); int er = errno; TL_ERRNO_END();
@@ -1427,7 +1530,7 @@ const tl_bionic_entry tl_tab_io[] = {
     TL_WRAP("sigaddset64", b_sigaddset), TL_WRAP("sigdelset64", b_sigdelset),
     TL_WRAP("sigismember", b_sigismember), TL_WRAP("sigismember64", b_sigismember),
     TL_WRAP("sigsuspend", b_sigsuspend), TL_WRAP("sigaltstack", b_sigaltstack), TL_WRAP("raise", b_raise),
-    TL_WRAP("poll", b_poll), TL_WRAP("select", b_select), TL_WRAP("__FD_SET_chk", b___FD_SET_chk),
+    TL_WRAP("poll", b_poll), TL_WRAP("ppoll", b_ppoll), TL_WRAP("nl_langinfo", b_nl_langinfo), TL_WRAP("getentropy", b_getentropy), TL_WRAP("memmem", b_memmem), TL_WRAP("eventfd_read", b_eventfd_read), TL_WRAP("eventfd_write", b_eventfd_write), TL_WRAP("select", b_select), TL_WRAP("__FD_SET_chk", b___FD_SET_chk),
     TL_WRAP("__FD_ISSET_chk", b___FD_ISSET_chk), TL_WRAP("__cmsg_nxthdr", b___cmsg_nxthdr),
     TL_WRAP("inotify_init", b_inotify_init), TL_WRAP("inotify_add_watch", b_inotify_add_watch),
     TL_END

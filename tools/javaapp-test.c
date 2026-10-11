@@ -152,7 +152,7 @@ static void *run(void *p)
     snprintf(paths[nb], sizeof(paths[nb]), "%s/../com.android.i18n/javalib/core-icu4j.jar", art); boot[nb] = paths[nb]; nb++;
     snprintf(paths[nb], sizeof(paths[nb]), "%s/../com.android.conscrypt/javalib/conscrypt.jar", art); boot[nb] = paths[nb]; nb++;
     snprintf(paths[nb], sizeof(paths[nb]), "%s", getenv("TL_FRAMEWORK") ? getenv("TL_FRAMEWORK") : "/Volumes/GTAV/husk2/java/husk-framework.dex"); boot[nb] = paths[nb]; nb++;
-    snprintf(paths[nb], sizeof(paths[nb]), "/Volumes/GTAV/husk2/modules/jars/org.apache.http.legacy.jar"); boot[nb] = paths[nb]; nb++;
+    snprintf(paths[nb], sizeof(paths[nb]), "%s", getenv("TL_HTTP_LEGACY") ? getenv("TL_HTTP_LEGACY") : "/Volumes/GTAV/husk2/modules/jars/org.apache.http.legacy.jar"); boot[nb] = paths[nb]; nb++;
     { char v[800];
       snprintf(v, sizeof(v), "%s", art); setenv("ANDROID_ART_ROOT", v, 0);
       snprintf(v, sizeof(v), "%s/../com.android.i18n", art); setenv("ANDROID_I18N_ROOT", v, 0);
@@ -164,11 +164,13 @@ static void *run(void *p)
     { char d[800]; snprintf(d, sizeof(d), "%s/../com.android.conscrypt/lib64", art); tl_ld_add_search_dir(d); }
     { void tl_set_cacerts_dir(const char *); static char d[800]; snprintf(d, sizeof(d), "%s/../com.android.conscrypt/cacerts", art); tl_set_cacerts_dir(d); }   /* the trusted roots, as the app ships them */
     { char d[800]; snprintf(d, sizeof(d), "%s/lib64", art); tl_dvm_load_natives(d); }
-    char tmp[600] = "/Volumes/GTAV/husk2/tmp/husk-javaapp-XXXXXX";
+    /* TL_SYSTEM_FILES: the android-system folder the app carries (fonts/, etc/, cacerts/), as the app sets it */
+    if (getenv("TL_SYSTEM_FILES")) { void tl_set_system_fonts_dir(const char *); tl_set_system_fonts_dir(getenv("TL_SYSTEM_FILES")); }
+    char tmp[600]; snprintf(tmp, sizeof(tmp), "%s/husk-javaapp-XXXXXX", getenv("TL_TMP") ? getenv("TL_TMP") : "/Volumes/GTAV/husk2/tmp");
     if (getenv("TL_DATA")) { snprintf(tmp, sizeof(tmp), "%s", getenv("TL_DATA")); mkdir(tmp, 0755); } else mkdtemp(tmp);
     const char *cef = "/Users/davi/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/Frameworks/Chromium Embedded Framework.framework/Versions/A/Libraries";
     static char egl[700], gles[700]; snprintf(egl, sizeof(egl), "%s/libEGL.dylib", cef); snprintf(gles, sizeof(gles), "%s/libGLESv2.dylib", cef);
-    static char frames[] = "/Volumes/GTAV/husk2/tmp/husk-jframes-XXXXXX"; mkdtemp(frames);
+    static char frames[600]; snprintf(frames, sizeof(frames), "%s/husk-jframes-XXXXXX", getenv("TL_TMP") ? getenv("TL_TMP") : "/Volumes/GTAV/husk2/tmp"); mkdtemp(frames);
     g_frame_dir = frames;
     fprintf(stderr, "frames: %s\ndata: %s\n", frames, tmp);
     int w = argc > 4 ? atoi(argv[3]) : 804, h = argc > 4 ? atoi(argv[4]) : 1748;

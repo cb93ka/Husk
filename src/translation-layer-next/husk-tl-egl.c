@@ -181,6 +181,12 @@ PASS_BOOL(eglReleaseThread, (void), ())
 
 static const char *w_eglQueryString(EGLDisplay d, EGLint name) { return a_eglQueryString(d, name); }
 static bool g_es31_shim;           /* defined with the rest of the shim, below */
+/* A Java app's render thread composes the screen (husk-tl-dvm-android.c): native EGL frames go to it, under the app's views. */
+bool tl_javaapp_composites(void);
+void *tl_javaapp_share_context(void);
+void tl_javaapp_native_context_made(bool shared);
+void tl_javaapp_native_surface(void *pb, int w, int h);
+bool tl_javaapp_native_swap(void *pb);
 static EGLContext w_eglCreateContext(EGLDisplay d, EGLConfig c, EGLContext share, const EGLint *at)
 {
     /* A game that insists on ES 3.1 or 3.2 (Unreal Engine tries 3.2, then 3.1) is given the 3.0 context ANGLE can make: the version it is then told is the shim's. */
@@ -194,7 +200,12 @@ static EGLContext w_eglCreateContext(EGLDisplay d, EGLConfig c, EGLContext share
         patched[n] = EGL_NONE;
         at = patched;
     }
-    EGLContext ctx = a_eglCreateContext(d, c, share, at);
+    EGLContext ctx;
+    if (share == NULL && tl_javaapp_composites()) {
+        ctx = a_eglCreateContext(d, c, tl_javaapp_share_context(), at);
+        if (ctx) tl_javaapp_native_context_made(true);
+        else { ctx = a_eglCreateContext(d, c, share, at); if (ctx) { tl_javaapp_native_context_made(false); tl_log_line("egl: the app's context cannot share with Husk's: its frames are read back"); } }
+    } else ctx = a_eglCreateContext(d, c, share, at);
     static int trace = -1;
     if (trace < 0) trace = getenv("TL_EGL_TRACE") ? 1 : 0;
     if (trace || !ctx) {
@@ -216,10 +227,11 @@ static bool g_offscreen_windows;
 void tl_egl_offscreen_windows(bool on) { g_offscreen_windows = on; }
 static EGLSurface w_eglCreateWindowSurface(EGLDisplay d, EGLConfig cfg, void *win, const EGLint *at)
 {
-    if (E.frame_dir[0] || g_offscreen_windows) {
+    if (E.frame_dir[0] || g_offscreen_windows || tl_javaapp_composites()) {
         EGLint pb[] = { EGL_WIDTH, tl_nwindow_width(win), EGL_HEIGHT, tl_nwindow_height(win), EGL_NONE };
         EGLSurface s = a_eglCreatePbufferSurface(d, cfg, pb);
-        tl_log_line("egl: window %dx%d -> off-screen surface %p", pb[1], pb[3], s);
+        tl_log_line("egl: window %dx%d -> off-screen surface %p%s", pb[1], pb[3], s, tl_javaapp_composites() ? " (composed under the app's views)" : "");
+        if (s && tl_javaapp_composites()) tl_javaapp_native_surface(s, pb[1], pb[3]);
         return s;
     }
     void *layer = tl_nwindow_native(win);
@@ -291,6 +303,7 @@ static EGLBoolean w_eglSwapBuffers(EGLDisplay d, EGLSurface s)
         tl_egl_gl_histogram(hist, sizeof(hist));
         fprintf(stderr, "egl: calls so far, by function: %s\n", hist);
     }
+    if (tl_javaapp_composites() && tl_javaapp_native_swap(s)) return EGL_TRUE;
     if (E.frame_dir[0] && (n % (unsigned long)E.frame_every == 0 || n <= 3)) save_frame(d, s, n);
     return E.frame_dir[0] ? EGL_TRUE : a_eglSwapBuffers(d, s);
 }

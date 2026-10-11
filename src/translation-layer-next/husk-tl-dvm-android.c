@@ -761,6 +761,79 @@ NAT(EN_swap)
     ret->z = true;
     return true;
 }
+/* ---- the same for native EGL (an engine that makes its context and window surface in C++: Qt)
+ *
+ * Its window surface on a SurfaceView's ANativeWindow is a pbuffer; eglSwapBuffers hands the frame to the render thread like
+ * EN_swap, so the app's views and dialogs (an ad SDK's consent dialog) are drawn over it rather than hidden under frames that went
+ * straight to the screen. Its contexts share the render thread's objects; one that cannot share has its frames read back. */
+static struct { EGLSurface pb; app_surf s; } g_nat[8];
+static bool g_nat_readback;
+bool tl_javaapp_composites(void) { return E2.ready; }
+void *tl_javaapp_share_context(void) { return E2.ready ? E2.ui : NULL; }
+void tl_javaapp_native_context_made(bool shared) { if (!shared) g_nat_readback = true; }
+void tl_javaapp_native_surface(void *pb, int w, int h)
+{
+    pthread_mutex_lock(&E2.lk);
+    for (int i = 0; i < 8; i++) if (!g_nat[i].pb || g_nat[i].pb == pb) { memset(&g_nat[i], 0, sizeof(g_nat[i])); g_nat[i].pb = pb; g_nat[i].s.pb = pb; g_nat[i].s.w = w; g_nat[i].s.h = h; break; }
+    pthread_mutex_unlock(&E2.lk);
+}
+bool tl_javaapp_native_swap(void *pb)
+{
+    app_surf *s = NULL;
+    for (int i = 0; i < 8; i++) if (g_nat[i].pb == pb) { s = &g_nat[i].s; break; }
+    if (!s) return false;
+    void (*getIntegerv)(uint32_t, int32_t *) = gl_fn("glGetIntegerv");
+    void (*bindTex)(uint32_t, uint32_t) = gl_fn("glBindTexture");
+    void (*activeTex)(uint32_t) = gl_fn("glActiveTexture");
+    void (*genTex)(int32_t, uint32_t *) = gl_fn("glGenTextures");
+    void (*texParam)(uint32_t, uint32_t, int32_t) = gl_fn("glTexParameteri");
+    void (*copyTex)(uint32_t, int32_t, uint32_t, int32_t, int32_t, int32_t, int32_t, int32_t) = gl_fn("glCopyTexImage2D");
+    void (*copyTexSub)(uint32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t) = gl_fn("glCopyTexSubImage2D");
+    void (*bindFb)(uint32_t, uint32_t) = gl_fn("glBindFramebuffer");
+    void (*readPixels)(int32_t, int32_t, int32_t, int32_t, uint32_t, uint32_t, void *) = gl_fn("glReadPixels");
+    void (*pixelStore)(uint32_t, int32_t) = gl_fn("glPixelStorei");
+    void (*finish)(void) = gl_fn("glFinish");
+    int32_t fb = 0, active = 0x84C0, tex = 0, pack = 4;
+    getIntegerv(0x8CA6, &fb);
+    getIntegerv(0x84E0, &active);
+    if (fb) bindFb(0x8D40, 0);
+    if (g_nat_readback) {
+        getIntegerv(0x0D05, &pack);
+        s->px = realloc(s->px, (size_t)s->w * s->h * 4);
+        pixelStore(0x0D05, 4);
+        readPixels(0, 0, s->w, s->h, 0x1908, 0x1401, s->px);
+        pixelStore(0x0D05, pack);
+        pthread_mutex_lock(&E2.lk);
+        E2.px = realloc(E2.px, (size_t)s->w * s->h * 4);
+        memcpy(E2.px, s->px, (size_t)s->w * s->h * 4);
+        E2.tex = 0;
+    } else {
+        activeTex(0x84C0);
+        getIntegerv(0x8069, &tex);
+        int k = s->cur;
+        if (!s->tex[k]) genTex(1, &s->tex[k]);
+        bindTex(0x0DE1, s->tex[k]);
+        if (s->tw[k] != s->w || s->th[k] != s->h) {
+            texParam(0x0DE1, 0x2801, 0x2601); texParam(0x0DE1, 0x2800, 0x2601);
+            texParam(0x0DE1, 0x2802, 0x812F); texParam(0x0DE1, 0x2803, 0x812F);
+            copyTex(0x0DE1, 0, 0x1908, 0, 0, s->w, s->h, 0);
+            s->tw[k] = s->w; s->th[k] = s->h;
+        } else copyTexSub(0x0DE1, 0, 0, 0, 0, 0, s->w, s->h);
+        bindTex(0x0DE1, (uint32_t)tex);
+        activeTex((uint32_t)active);
+        finish();
+        s->cur ^= 1;
+        pthread_mutex_lock(&E2.lk);
+        E2.tex = s->tex[k];
+    }
+    E2.pw = s->w; E2.ph = s->h;
+    E2.x = 0; E2.y = 0; E2.w = s->w; E2.h = s->h;           /* the engine's window fills the screen */
+    E2.on = true; E2.seq++;
+    pthread_mutex_unlock(&E2.lk);
+    if (fb) bindFb(0x8D40, (uint32_t)fb);
+    return true;
+}
+
 /* the GL thread Husk drives GLSurfaceView from: there EGL10 answers for the context it made */
 static pthread_t g_render_thread;
 NAT(EN_isRenderThread) { (void)self; (void)a; ret->j = 0; ret->z = pthread_equal(pthread_self(), g_render_thread) != 0; return true; }
@@ -1037,6 +1110,43 @@ static void *app_main(void *arg)
     return NULL;
 }
 
+/* tl_ld_apk_libs callback: notes Qt's core library. */
+static int qt_lib_seen_cb;
+static void qt_lib_seen(const char *name, uint64_t size, void *user)
+{
+    (void)size; (void)user;
+    if (!strncmp(name, "libQt5Core", 10) || !strncmp(name, "libQt6Core", 10)) qt_lib_seen_cb = 1;
+}
+
+static void qt_unpack_plugins(const char *apk, const char *data)
+{
+    tl_zip z; char err[160];
+    if (!tl_zip_open(&z, apk, err, sizeof(err))) return;
+    char dir[1024]; snprintf(dir, sizeof(dir), "%s/lib", data); mkdir(dir, 0755);
+    int n = 0;
+    for (size_t i = 0; i < z.count; i++) {
+        const tl_zip_entry *e = &z.entries[i];
+        if (strncmp(e->name, "lib/arm64-v8a/", 14)) continue;
+        const char *b = e->name + 14;
+        char path[1400]; snprintf(path, sizeof(path), "%s/%s", dir, b);
+        struct stat st;
+        /* The other libraries only have to be there (Qt's loader checks before it calls System.load, which Husk serves from the
+         * APK): an empty file says so without a second copy. */
+        if (strncmp(b, "libplugins_", 11) && strncmp(b, "libqml_", 7)) {
+            if (stat(path, &st) != 0) { FILE *f = fopen(path, "wb"); if (f) fclose(f); }
+            continue;
+        }
+        if (stat(path, &st) == 0 && (uint64_t)st.st_size == e->usize) continue;
+        const uint8_t *d; size_t len; bool owned;
+        if (!tl_zip_data(&z, e, (size_t)256 << 20, &d, &len, &owned, err, sizeof(err))) continue;
+        FILE *f = fopen(path, "wb");
+        if (f) { fwrite(d, 1, len, f); fclose(f); n++; }
+        if (owned) free((void *)d);
+    }
+    tl_zip_close(&z);
+    if (n) tl_log_line("javaapp: %d Qt plugins put in %s", n, dir);
+}
+
 bool tl_javaapp_start(const tl_javaapp_config *cfg)
 {
     A.cfg = *cfg;
@@ -1056,6 +1166,18 @@ bool tl_javaapp_start(const tl_javaapp_config *cfg)
     if (cfg->angle_egl && !tl_egl_init(cfg->angle_egl, cfg->angle_gles, cfg->frame_dir, cfg->frame_every)) return false;
     if (!tl_ld_add_apk(cfg->apk_path)) return false;
     if (!tl_dvm_add_apk(cfg->apk_path)) return false;
+    /* Qt: its regular expressions (PCRE2) and QML's JavaScript engine compile to machine code in memory they map executable, which
+     * a guest cannot have (the mapping comes back writable only, and the first call into it is a bus error). Qt's own switches turn
+     * both to their interpreters. */
+    tl_ld_apk_libs(qt_lib_seen, NULL);
+    if (qt_lib_seen_cb) {
+        setenv("QT_ENABLE_REGEXP_JIT", "0", 1);
+        setenv("QV4_FORCE_INTERPRETER", "1", 1);
+        tl_log_line("javaapp: a Qt app: regular expressions and QML run interpreted");
+        /* Qt finds its plugins as files in nativeLibraryDir (<data>/lib, where Android unpacks an APK's libraries) and reads their
+         * metadata from the file before it loads one: those files are put there. Loading them still goes through Husk's linker. */
+        qt_unpack_plugins(cfg->apk_path, cfg->data_dir);
+    }
     { pthread_attr_t rt; pthread_attr_init(&rt); pthread_attr_setstacksize(&rt, 64u << 20); pthread_create(&A.gl_thread, &rt, gl_main, NULL); }
     pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, 256u << 20);
     pthread_t t;

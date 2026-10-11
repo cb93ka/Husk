@@ -28,9 +28,10 @@ public class ApplicationInfo extends PackageItemInfo implements android.os.Parce
             a.nativeLibraryDir = a.dataDir + "/lib";
             a.className = husk.Manifest.applicationClass;
             a.name = husk.Manifest.applicationClass;
-            a.theme = husk.Manifest.appTheme; a.labelRes = husk.Manifest.appLabel; a.icon = husk.Manifest.appIcon;
+            a.theme = husk.Manifest.appTheme; a.labelRes = husk.Manifest.appLabel; a.nonLocalizedLabel = husk.Manifest.appLabelText; a.icon = husk.Manifest.appIcon;
             a.targetSdkVersion = husk.Manifest.targetSdk; a.minSdkVersion = husk.Manifest.minSdk;
-            a.flags = FLAG_HAS_CODE | FLAG_INSTALLED | FLAG_ALLOW_BACKUP | FLAG_SUPPORTS_RTL | FLAG_HARDWARE_ACCELERATED | (husk.Manifest.debuggable ? FLAG_DEBUGGABLE : 0) | (husk.Manifest.largeHeap ? FLAG_LARGE_HEAP : 0);
+            a.flags = FLAG_HAS_CODE | FLAG_INSTALLED | FLAG_ALLOW_BACKUP | FLAG_SUPPORTS_RTL | FLAG_HARDWARE_ACCELERATED | (husk.Manifest.debuggable ? FLAG_DEBUGGABLE : 0) | (husk.Manifest.largeHeap ? FLAG_LARGE_HEAP : 0)
+                    | (husk.Manifest.extractNativeLibs ? FLAG_EXTRACT_NATIVE_LIBS : 0);
             a.metaData = husk.Manifest.appMetaData;
             a.appComponentFactory = husk.Manifest.appComponentFactory;
             a.uid = android.os.Process.myUid();

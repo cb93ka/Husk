@@ -19,6 +19,7 @@ public final class Manifest {
         public final ArrayList<String> actions = new ArrayList<>(), categories = new ArrayList<>(), schemes = new ArrayList<>(), mimeTypes = new ArrayList<>(), hosts = new ArrayList<>();
     }
     public static String packageName, applicationClass, versionName, appComponentFactory;
+    public static String appLabelText;
     public static int versionCode, minSdk = 21, targetSdk = 34, appTheme, appLabel, appIcon, appFlags;
     public static boolean debuggable, largeHeap, hardwareAccelerated = true, extractNativeLibs = true;
     public static Bundle appMetaData = new Bundle();
@@ -68,9 +69,11 @@ public final class Manifest {
                     applicationClass = full(p.getAttributeValue(NS, "name"));
                     appTheme = p.getAttributeResourceValue(NS, "theme", 0);
                     appLabel = p.getAttributeResourceValue(NS, "label", 0);
+                    if (appLabel == 0) appLabelText = p.getAttributeValue(NS, "label");
                     appIcon = p.getAttributeResourceValue(NS, "icon", 0);
                     debuggable = p.getAttributeBooleanValue(NS, "debuggable", false);
                     largeHeap = p.getAttributeBooleanValue(NS, "largeHeap", false);
+                    extractNativeLibs = p.getAttributeBooleanValue(NS, "extractNativeLibs", true);
                     hardwareAccelerated = p.getAttributeBooleanValue(NS, "hardwareAccelerated", true);
                     appComponentFactory = full(p.getAttributeValue(NS, "appComponentFactory"));
                     break;

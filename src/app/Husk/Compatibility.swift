@@ -36,7 +36,6 @@ extension TLReport {
     /// this they would be tried on the Java runtime and fail with "could not start".
     var unsupportedEngine: String? {
         let names = Set(libraries.filter { $0.abi == "arm64-v8a" }.map(\.name))
-        if names.contains(where: { $0.hasPrefix("libQt6Core") || $0.hasPrefix("libQt5Core") }) { return "Qt" }
         if names.contains("libdmengine.so") { return "Defold" }
         if names.contains("libcocos.so") { return L("Cocos Creator 3") }
         if names.contains("libcocos2djs.so") { return L("Cocos Creator 2 (JavaScript)") }
@@ -69,6 +68,12 @@ extension TLApp {
                                  detail: L("\(label) is made with \(engine), which Husk has no translation layer for yet, so it will not start."))
         }
         let failedBefore = last == .failed || last == .crashed
+        // Qt runs on Husk's Java runtime: its own Java starts the engine, which draws through native EGL under the app's views.
+        if r.libraries.contains(where: { $0.abi == "arm64-v8a" && ($0.name.hasPrefix("libQt6Core") || $0.name.hasPrefix("libQt5Core")) }) {
+            return Compatibility(kind: failedBefore ? .unsure : .likely, short: failedBefore ? (last?.label ?? "") : "",
+                                 title: failedBefore ? (last?.label ?? L("May not run")) : L("Should run: Qt"),
+                                 detail: L("A Qt app: Husk runs its Java side on its own runtime and the Qt engine natively. The first start takes a little longer."))
+        }
         switch r.nativeEngine {
         case nil:
             return Compatibility(kind: .unsupported, short: "Not supported", title: L("Not supported"),

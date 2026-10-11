@@ -63,13 +63,21 @@ public class AlertDialog extends Dialog implements DialogInterface {
             mTitleView = new TextView(c);
             mTitleView.setText(mTitle); mTitleView.setTextColor(textPrimary); mTitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
             mTitleView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            mTitleView.setId(alertTitleId());
             tl.addView(mTitleView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
             root.addView(tl);
+        } else {
+            /* As on Android, the title view is there even without a title (hidden): apps find it by android:id/alertTitle and style it. */
+            mTitleView = new TextView(c);
+            mTitleView.setId(alertTitleId());
+            mTitleView.setVisibility(View.GONE);
+            root.addView(mTitleView);
         }
         // body: message, list or the app's view
         if (mMessage != null) {
             ScrollView sv = new ScrollView(c);
             mMessageView = new TextView(c);
+            mMessageView.setId(android.R.id.message);
             mMessageView.setText(mMessage); mMessageView.setTextColor(textSecondary); mMessageView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
             mMessageView.setLineSpacing(0, 1.15f);
             mMessageView.setPadding((int) dp(24), 0, (int) dp(24), (int) dp(16));
@@ -138,6 +146,11 @@ public class AlertDialog extends Dialog implements DialogInterface {
         setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         int sw = husk.Native.screenWidth();
         getWindow().setLayout(Math.min((int) (sw * 0.9f), (int) dp(560)), ViewGroup.LayoutParams.WRAP_CONTENT);
+    }
+    /** The platform's internal id for the title (com.android.internal.R.id.alertTitle), as framework-res numbers it. */
+    private static int alertTitleId() {
+        int id = android.content.res.Resources.getSystem().getIdentifier("alertTitle", "id", "android");
+        return id != 0 ? id : 0x01020016;
     }
     public Button getButton(int which) { build(); int k = which == BUTTON_POSITIVE ? 0 : which == BUTTON_NEGATIVE ? 1 : which == BUTTON_NEUTRAL ? 2 : -1; return k < 0 ? null : mButtons[k]; }
     public ListView getListView() { build(); return mListView; }
