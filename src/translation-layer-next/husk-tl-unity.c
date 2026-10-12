@@ -194,7 +194,9 @@ static void load_engine(void)
          * On OpenGL ES its pacing keeps time (tl_thread_realtime). The Graphics setting can still ask for Vulkan. */
         tl_vk_withdraw();
         tl_log_line("unity: renderer OpenGL ES (ANGLE) -- Unity before 6 gets Vulkan only when the game's Graphics setting asks for it");
-    }
+    } else if (U.cfg.vulkan) {
+        tl_log_line("unity: renderer left to the engine (Vulkan when it wants it): the game's Graphics setting is %s", husk_unity_renderer() == 2 ? "Vulkan" : "Automatic");
+    } else tl_log_line("unity: renderer OpenGL ES (ANGLE): the game's Graphics setting is OpenGL ES");
     U.player = tl_jni_new_object(tl_jni_class(U.player_cls));
     U.loaded = ok != 0;
 }

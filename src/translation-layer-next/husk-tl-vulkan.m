@@ -77,7 +77,8 @@ static void vk_load(void)
 static bool vk_ready(void) { pthread_once(&V.once, vk_load); return V.gipa != NULL; }
 bool tl_vk_available(void) { return V.have_path && vk_ready(); }
 /* No Vulkan after all: libvulkan.so is not found from now on (an engine that has not opened it yet uses OpenGL ES). */
-void tl_vk_withdraw(void) { V.have_path = false; }
+static bool g_vk_withdrawn;
+void tl_vk_withdraw(void) { V.have_path = false; g_vk_withdrawn = true; }
 
 /* MoltenVK's own list of instance extensions */
 static vk_ext_props *mvk_instance_exts(uint32_t *n)
@@ -791,7 +792,7 @@ static void *w_vkGetDeviceProcAddr(void *device, const char *name)
 
 void *tl_vk_resolve(const char *name)
 {
-    if (!vk_ready()) return NULL;
+    if (g_vk_withdrawn || !vk_ready()) return NULL;          /* withdrawn: not by dlsym either */
     void *fn = overridden(name);
     if (fn) return fn;
     return V.lib ? dlsym(V.lib, name) : NULL;
