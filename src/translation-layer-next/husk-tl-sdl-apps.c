@@ -257,6 +257,153 @@ void tl_xash_prepare(const char *apk, const char *data_dir, const char *package)
     tl_log_line("xash: XASH3D_BASEDIR=%s XASH3D_GAME=%s", base, getenv("XASH3D_GAME"));
 }
 
+/* ------------------------------------------------- Source Engine (GMod VR flat) */
+
+/*
+ * The Source Engine port behind "Garry's Mod" for Android (com.gmodvr.flat, nillerusr's source-engine with a GMod layer). Its Kotlin
+ * launcher logs in to Steam, downloads the game and then starts GameActivity, which sets the environment below and hands SDL
+ * liblauncher.so's LauncherMainAndroid. None of that Java runs here: the player puts the game's folder (garrysmod/, sourceengine/, ...)
+ * into GarrysMod in the app's data, and what the launcher prepares is prepared here -- assets/runtime.zip (touch layouts, shaders,
+ * fonts) unpacked to files/runtime, the writable game folder with gameinfo.txt and the cfg files, and the launch arguments.
+ */
+static bool g_source, g_source_missing;
+bool tl_source_port(void) { return g_source; }
+bool tl_source_missing(void) { return g_source_missing; }    /* no game folder yet: the engine is not started */
+
+static bool write_text(const char *path, const char *text, bool keep)
+{
+    struct stat st;
+    if (keep && stat(path, &st) == 0) return true;
+    char tmp[1100]; snprintf(tmp, sizeof(tmp), "%s.part", path);
+    FILE *f = fopen(tmp, "wb");
+    bool ok = f && fputs(text, f) >= 0;
+    if (f && fclose(f)) ok = false;
+    if (!ok || rename(tmp, path)) { unlink(tmp); return false; }
+    return true;
+}
+static bool copy_file(const char *from, const char *to)
+{
+    FILE *a = fopen(from, "rb"); if (!a) return false;
+    char tmp[1100]; snprintf(tmp, sizeof(tmp), "%s.part", to);
+    FILE *b = fopen(tmp, "wb");
+    bool ok = b != NULL; char buf[65536]; size_t n;
+    while (ok && (n = fread(buf, 1, sizeof(buf), a)) > 0) ok = fwrite(buf, 1, n, b) == n;
+    fclose(a);
+    if (b && fclose(b)) ok = false;
+    if (!ok || rename(tmp, to)) { unlink(tmp); return false; }
+    return true;
+}
+static bool is_file(const char *p) { struct stat st; return stat(p, &st) == 0 && S_ISREG(st.st_mode); }
+
+/* assets/runtime.zip into files/runtime, again whenever assets/runtime.sha256 changes (the launcher's .identity). */
+static void source_runtime(const tl_zip *apk, const char *runtime)
+{
+    const tl_zip_entry *sum = tl_zip_find(apk, "assets/runtime.sha256"), *rz = tl_zip_find(apk, "assets/runtime.zip");
+    if (!rz) return;
+    char want[100] = "", have[100] = "", ident[800], err[160];
+    const uint8_t *d; size_t len; bool owned;
+    if (sum && tl_zip_data(apk, sum, 4096, &d, &len, &owned, err, sizeof(err))) {
+        snprintf(want, sizeof(want), "%.*s", (int)(len < 99 ? len : 99), (const char *)d);
+        want[strcspn(want, "\r\n ")] = 0;
+        if (owned) free((void *)d);
+    }
+    snprintf(ident, sizeof(ident), "%s/.identity", runtime);
+    FILE *f = fopen(ident, "r"); if (f) { if (!fgets(have, sizeof(have), f)) have[0] = 0; fclose(f); }
+    if (want[0] && !strcmp(want, have)) return;
+    tl_progress("Unpacking the game's runtime (first start only)", 0);
+    char inner[800]; snprintf(inner, sizeof(inner), "%s.zip.part", runtime);
+    mkdirs_to(inner);
+    bool ok = false;
+    if (tl_zip_data(apk, rz, (size_t)1 << 30, &d, &len, &owned, err, sizeof(err))) {
+        FILE *o = fopen(inner, "wb");
+        ok = o && fwrite(d, 1, len, o) == len;
+        if (o && fclose(o)) ok = false;
+        if (owned) free((void *)d);
+    }
+    tl_zip iz;
+    if (ok && tl_zip_open(&iz, inner, err, sizeof(err))) {
+        mkdir(runtime, 0755);
+        long n = unpack(&iz, "", runtime);
+        tl_zip_close(&iz);
+        tl_log_line("source: unpacked %ld runtime files into %s", n, runtime);
+        if (n > 0 && want[0]) write_text(ident, want, false);
+    } else tl_log_line("source: assets/runtime.zip could not be unpacked");
+    unlink(inner);
+    tl_progress("Starting the engine", -1);
+}
+
+void tl_source_prepare(const char *apk, const char *data_dir, const char *package, int width, int height)
+{
+    tl_zip z; char err[160];
+    if (!tl_zip_open(&z, apk, err, sizeof(err))) return;
+    g_source = tl_zip_find(&z, "lib/arm64-v8a/liblauncher.so") && tl_zip_find(&z, "lib/arm64-v8a/libengine.so") && tl_zip_find(&z, "assets/runtime.zip");
+    if (!g_source) { tl_zip_close(&z); return; }
+    const char *game = "garrysmod";                                   /* GameContentProfile.DEFAULT: the only one this build takes */
+    char ext[700], runtime[700], content[800], user[800], p[1000];
+    snprintf(ext, sizeof(ext), "%s/sdcard/Android/data/%s/files", data_dir, package);
+    snprintf(runtime, sizeof(runtime), "%s/files/runtime", data_dir);
+    source_runtime(&z, runtime);
+    tl_zip_close(&z);
+
+    /* The game's folder: where the player put it. GarrysMod in the app's data first; the launcher's own places after. */
+    const char *cands[] = { "%s/GarrysMod", "%s/sdcard/srceng", "%s/sdcard/SourceAndroid", NULL };
+    content[0] = 0;
+    for (int i = 0; cands[i]; i++) {
+        char c[800]; snprintf(c, sizeof(c), cands[i], data_dir);
+        snprintf(p, sizeof(p), "%s/%s/gameinfo.txt", c, game);
+        if (is_file(p)) { snprintf(content, sizeof(content), "%s", c); break; }
+    }
+    if (!content[0]) {
+        snprintf(content, sizeof(content), "%s/GarrysMod", data_dir);
+        mkdir(content, 0755);
+        tl_log_line("source: no %s/gameinfo.txt -- put Garry's Mod's game folder (garrysmod, sourceengine, platform, ...) into %s", game, content);
+        const char *id = strrchr(data_dir, '/');
+        char msg[300];
+        snprintf(msg, sizeof(msg), "Put the Garry's Mod game files (garrysmod, sourceengine, platform...) into Files > Husk > TranslationLayer > %s > GarrysMod, then start again",
+                 id ? id + 1 : data_dir);
+        tl_progress(msg, -1);
+        g_source_missing = true;
+    }
+
+    /* The writable game folder (Storage.user): the game's gameinfo.txt, cfg and save. */
+    snprintf(user, sizeof(user), "%s/user/%s", ext, game);
+    snprintf(p, sizeof(p), "%s/cfg/x", user); mkdirs_to(p);
+    snprintf(p, sizeof(p), "%s/save/x", user); mkdirs_to(p);
+    { char from[1000]; snprintf(from, sizeof(from), "%s/%s/gameinfo.txt", content, game); snprintf(p, sizeof(p), "%s/gameinfo.txt", user); if (is_file(from)) copy_file(from, p); }
+    { char from[1000]; snprintf(from, sizeof(from), "%s/cfg/android_first_run.cfg", runtime); snprintf(p, sizeof(p), "%s/cfg/config.cfg", user); if (!is_file(p) && is_file(from)) copy_file(from, p); }
+    snprintf(p, sizeof(p), "%s/cfg/android_settings.cfg", user);
+    write_text(p, "// Generated from the GDroid launcher settings.\nfps_max 60\ntouch_enable 1\ntouch_opacity 1.0\ntouch_sensitivity 3.0\ntouch_pitch 90\n"
+                  "mat_queue_mode 0\nvr_mainmenu 0\nmat_antialias 0\nmat_vsync 1\n", false);
+    snprintf(p, sizeof(p), "%s/cfg/android_player_name.cfg", user);
+    write_text(p, "", true);
+
+    char tmp[700]; snprintf(tmp, sizeof(tmp), "%s/cache", data_dir); mkdir(tmp, 0755);
+    char userparent[800]; snprintf(userparent, sizeof(userparent), "%s/user", ext);
+    setenv("APP_DATA_PATH", userparent, 1);
+    setenv("VALVE_GAME_PATH", userparent, 1);
+    setenv("APP_LIB_PATH", "/data/app/lib/arm64", 1);
+    setenv("APP_MOD_LIB", "/data/app/lib/arm64", 1);
+    setenv("SOURCEVR_GAME", game, 1);
+    setenv("SOURCE_GAME", game, 1);
+    setenv("SOURCEVR_SHARED_CONTENT_PATH", content, 1);
+    setenv("SOURCEVR_WRITE_GAME_PATH", user, 1);
+    setenv("EXTRAS_VPK_PATH", runtime, 1);
+    setenv("LANG", "en_US.UTF-8", 1);
+    setenv("SDL_ANDROID_TRAP_BACK_BUTTON", "1", 1);
+    setenv("TMPDIR", tmp, 1);
+    setenv("SQLITE_TMPDIR", tmp, 1);
+
+    /* LaunchArguments.build for the menu: the render size the launcher picks (720 lines, the screen's shape), no starting map. */
+    int lo = width < height ? width : height, hi = width < height ? height : width;
+    if (lo < 1) lo = 1;
+    int h = lo < 720 ? lo : 720, w = (int)((long)hi * h / lo / 2 * 2);
+    if (w < 640) w = 640;
+    char args[300];
+    snprintf(args, sizeof(args), "-game %s -steam -nouserclip -novid -hushasserts -mobile -fullscreen -w %d -h %d +exec android_settings.cfg", game, w, h);
+    tl_sdl_set_default_arguments(args);
+    tl_log_line("source: game %s, content %s, writable %s", game, content, user);
+}
+
 static void XA_androidID(tl_jcall *c) { jvalue v; v.j = 0; v.l = tl_jni_new_string(tl_hle_android_id()); c->ret = v; }
 static void XA_null(tl_jcall *c) { jvalue v; v.j = 0; v.l = NULL; c->ret = v; }
 static void XA_getAssets(tl_jcall *c) { c->ret = tl_jni_call(c->self, "getAssets", "()Landroid/content/res/AssetManager;", NULL); }

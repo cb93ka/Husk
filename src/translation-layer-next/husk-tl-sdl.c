@@ -696,6 +696,8 @@ bool tl_sdl_start(const tl_ga_config *cfg, const char *activity_class)
     { bool tl_python_prepare(const char *apk, const char *data_dir); tl_python_prepare(S.apk, S.data); }
     /* Xash3D (Half-Life, Counter-Strike): the game data its launcher unpacks, and the environment it sets. */
     { void tl_xash_prepare(const char *apk, const char *data_dir, const char *package); tl_xash_prepare(S.apk, S.data, S.pkg); }
+    /* Source Engine (Garry's Mod): the same, for its launcher (husk-tl-sdl-apps.c). */
+    { void tl_source_prepare(const char *apk, const char *data_dir, const char *package, int width, int height); tl_source_prepare(S.apk, S.data, S.pkg, cfg->width, cfg->height); }
 
     tl_set_data_dir(cfg->data_dir);
     tl_nwindow_configure(cfg->width, cfg->height, cfg->metal_layer);
@@ -756,7 +758,8 @@ bool tl_sdl_start(const tl_ga_config *cfg, const char *activity_class)
             if (tl_jni_pending()) { tl_log_line("sdl: loading lib%s.so failed", load[i]); return false; }
         }
         /* Several libraries of the game's own and none called libmain (LOVE: a big liblove library and a small one that holds SDL_main): the one that exports SDL_main is the entry. */
-        if (!ls.main && ls.ncand > 1) {
+        bool tl_source_port(void);
+        if (!ls.main && ls.ncand > 1 && !tl_source_port()) {
             for (int i = 0; i < ls.ncand; i++) {
                 snprintf(name, sizeof(name), "%s", ls.cand[i] + 3); name[strlen(name) - 3] = 0;
                 if (strcmp(ls.cand[i], S.main_lib)) { load_library(name); if (tl_jni_pending()) tl_jni_clear(); }
@@ -778,6 +781,8 @@ bool tl_sdl_start(const tl_ga_config *cfg, const char *activity_class)
         tl_lib *ml = S.main_lib[0] ? tl_ld_find_lib(S.main_lib) : NULL;
         if (ml && !tl_ld_sym(ml, "SDL_main") && tl_ld_sym(ml, "SDL_Main")) snprintf(S.main_fn, sizeof(S.main_fn), "SDL_Main");
     }
+    /* Source Engine: GameActivity.getMainFunction() names LauncherMainAndroid in liblauncher.so */
+    { bool tl_source_port(void); if (tl_source_port()) { snprintf(S.main_lib, sizeof(S.main_lib), "liblauncher.so"); snprintf(S.main_fn, sizeof(S.main_fn), "LauncherMainAndroid"); } }
     tl_log_line("sdl: libraries loaded (entry %s)", S.main_fn);
     /* The D-pad as buttons (DPAD_UP...), the way SDL maps them, rather than as the hat the gamepad layer sends by default. Read by the layer at the first controller update. */
     setenv("TL_PAD_DPAD", "keys", 0);
@@ -806,6 +811,7 @@ static void *sdl_main_thread(void *arg)
     int (*run_main)(void *, void *, void *, void *, void *) = native_of(SDLA, "nativeRunMain", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Object;)I");
     void (*cleanup)(void *, void *) = find_native(SDLA, "nativeCleanupMainThread", "()V");
     if (!run_main) return NULL;
+    { bool tl_source_missing(void); if (tl_source_missing()) { tl_log_line("sdl: the game's files are missing; not starting it"); return NULL; } }
     if (init_main) init_main(env, cls);
     tl_log_line("sdl: SDL_main starting");
     /* SDLActivity.getArguments(): what the player set as the game's launch arguments, split at spaces */
