@@ -46,7 +46,7 @@ static struct {
 } U;
 
 /* The game's Graphics setting (husk-tl-unity-app.c): 0 automatic, 1 OpenGL ES, 2 Vulkan. Automatic where the app is not linked in (the harness). */
-__attribute__((weak)) int husk_unity_renderer(void) { return 0; }
+__attribute__((weak)) int husk_unity_renderer(void) { return getenv("TL_UNITY_RENDERER") ? atoi(getenv("TL_UNITY_RENDERER")) : 0; }
 
 /*
  * The UI thread: Android's main thread, with its looper. libunity's JNI_OnLoad takes ALooper_forThread() as the UI
