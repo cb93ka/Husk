@@ -452,6 +452,18 @@ static void w_glCompileShader(unsigned sh)
     if (slen > 0) getsrc(sh, slen, &got, src);
     for (char *q = log; *q; q++) if (*q == '\n') *q = '|';
     tl_log_line("gl: shader %u failed to compile (%d bytes of source): %.380s", sh, slen, log);
+    /* the version line and the first line the log blames, as the driver got them */
+    {
+        const char *e = strstr(log, "0:"); int ln = e ? atoi(e + 2) : 0;
+        const char *p = src; int cur = 1; char first[120] = "", bad[160] = "";
+        for (const char *q = src;; q++) if (*q == '\n' || !*q) {
+            int l = (int)(q - p); if (l > 150) l = 150;
+            if (cur == 1) snprintf(first, sizeof(first), "%.*s", l < 110 ? l : 110, p);
+            if (cur == ln) snprintf(bad, sizeof(bad), "%.*s", l, p);
+            if (!*q) break; p = q + 1; cur++;
+        }
+        tl_log_line("gl:   line 1: %s | line %d: %s", first, ln, bad);
+    }
     const char *dir = getenv("TL_GL_SHADER_DUMP");
     if (dir) {
         char path[600]; snprintf(path, sizeof(path), "%s/shader-%d.txt", dir, n);

@@ -37,9 +37,9 @@ static char *es31_downgrade(const char *src, size_t n, es31_bind *rec, int *nrec
 {
     char *out = malloc(n + 4096); size_t o = 0;
     *nrec = 0;
-    const char *ver = strstr(src, "#version 310 es");
-    /* A 300 es shader with explicit uniform locations (UE4's GLSL_ES3_1_ANDROID): only those go, also on a real 3.1 driver. */
-    bool v300 = !ver && strstr(src, "#version 300 es") && strstr(src, "location");
+    const char *ver = g_es31_shim ? strstr(src, "#version 310 es") : NULL;     /* a real 3.1 driver keeps 310 es */
+    /* Any other shader with explicit uniform locations (UE4's GLSL_ES3_1_ANDROID): only those go, also on a real 3.1 driver. */
+    bool v300 = !ver && strstr(src, "location") && strstr(src, "uniform");
     if (!ver && !v300) { memcpy(out, src, n); out[n] = 0; return out; }
     for (size_t i = 0; i < n;) {
         if (src + i == ver) { memcpy(out + o, "#version 300 es", 15); o += 15; i += 15; continue; }
