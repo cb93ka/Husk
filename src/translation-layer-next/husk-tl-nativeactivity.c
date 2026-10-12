@@ -7,6 +7,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <fcntl.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -93,6 +94,37 @@ static void mkdirs(const char *path)
 
 
 /* Where a stored (uncompressed) entry's bytes begin in the APK, and how many there are. */
+static bool stored_range(const char *apk, const char *entry, unsigned long long *off, unsigned long long *size);
+
+/* Which shader libraries the OBB's pak names in its index (the last part of the file): 1 Vulkan, 2 OpenGL ES, 3 both, 0 none found. */
+static int ue4_shader_formats(const char *apk)
+{
+    unsigned long long off = 0, size = 0;
+    const char *entry = getenv("TL_UE4_OBB_ENTRY") ? getenv("TL_UE4_OBB_ENTRY") : "assets/main.obb.png";
+    if (!stored_range(apk, entry, &off, &size)) return 0;
+    int fd = open(apk, O_RDONLY);
+    if (fd < 0) return 0;
+    const unsigned long long window = 128ull << 20, chunk = 4u << 20, overlap = 64;
+    unsigned long long pos = size > window ? off + size - window : off, end = off + size;
+    char *buf = malloc(chunk + overlap);
+    int found = 0;
+    size_t keep = 0;
+    while (buf && pos < end && found != 3) {
+        size_t want = (size_t)(end - pos < chunk ? end - pos : chunk);
+        ssize_t n = pread(fd, buf + keep, want, (off_t)pos);
+        if (n <= 0) break;
+        size_t have = keep + (size_t)n;
+        if (memmem(buf, have, "SF_VULKAN_ES31_ANDROID", 22) || memmem(buf, have, "SF_VULKAN_SM5_ANDROID", 21)) found |= 1;
+        if (memmem(buf, have, "GLSL_ES3_1_ANDROID", 18)) found |= 2;
+        keep = have < overlap ? have : overlap;
+        memmove(buf, buf + have - keep, keep);
+        pos += (unsigned long long)n;
+    }
+    free(buf);
+    close(fd);
+    return found;
+}
+
 static bool stored_range(const char *apk, const char *entry, unsigned long long *off, unsigned long long *size)
 {
     tl_zip z; char err[160];
@@ -266,9 +298,18 @@ bool tl_na_start(const tl_ga_config *cfg)
         tl_lib *ue = tl_ld_find_lib("libUE4.so");
         if (ue) { patch_return(ue, "_ZN12FAndroidMisc15ShouldUseVulkanEv", 0); patch_return(ue, "_ZN12FAndroidMisc22ShouldUseDesktopVulkanEv", 0); }
     }
+    /* Only a game whose pak carries Vulkan shaders can run on Vulkan: one built for OpenGL ES alone (Five Nights at Freddy's: Security Breach)
+     * asked for Vulkan finds no shader library for it and quits in FShaderCodeLibrary::InitForRuntime. The pak's index, at its end, names the
+     * libraries (ShaderArchive-...-SF_VULKAN_ES31_ANDROID / -GLSL_ES3_1_ANDROID): a game with OpenGL ES ones and no Vulkan ones keeps OpenGL ES. */
+    int formats = N.generic ? 0 : ue4_shader_formats(N.apk);
+    if (formats == 2) {
+        tl_log_line("ue4: the game's pak has OpenGL ES shaders and no Vulkan ones: it runs on OpenGL ES (ANGLE)");
+        tl_lib *ue = tl_ld_find_lib("libUE4.so");
+        if (ue) { patch_return(ue, "_ZN12FAndroidMisc15ShouldUseVulkanEv", 0); patch_return(ue, "_ZN12FAndroidMisc22ShouldUseDesktopVulkanEv", 0); }
+    } else if (formats) tl_log_line("ue4: the game's pak has %s shaders", formats == 1 ? "Vulkan" : "Vulkan and OpenGL ES");
     /* ANGLE over Metal speaks OpenGL ES 3.0 and the engine's ES 3.1 shaders will not compile on it, so when MoltenVK is there the engine is asked for Vulkan -- also for a project
      * that defaults to OpenGL ES (bDetectVulkanByDefault off), which Minecraft Dungeons is. TL_UE4_NO_VULKAN opts out; TL_UE4_FORCE_VULKAN forces it even with no MoltenVK. */
-    if ((getenv("TL_UE4_FORCE_VULKAN") || (tl_vk_available() && !getenv("TL_UE4_NO_VULKAN")))) {
+    if ((getenv("TL_UE4_FORCE_VULKAN") || (tl_vk_available() && !getenv("TL_UE4_NO_VULKAN") && formats != 2))) {
         tl_lib *ue = tl_ld_find_lib("libUE4.so");
         if (ue) { patch_return(ue, "_ZN12FAndroidMisc15ShouldUseVulkanEv", 1); patch_return(ue, "_ZN12FAndroidMisc17IsVulkanAvailableEv", 1); }
     }
