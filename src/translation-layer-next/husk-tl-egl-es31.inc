@@ -32,6 +32,16 @@ static const char *es31_fix(const char *s, bool glsl)
     return out;
 }
 
+/* The driver's own minor version, asked once a context is current: 1 or more and the shim only renumbers shaders. */
+static int g_es31_real_minor = -1;
+static int es31_real_minor(void)
+{
+    if (g_es31_real_minor < 0 && a_glGetIntegerv) { int m = 0; a_glGetIntegerv(0x821C /* GL_MINOR_VERSION */, &m); g_es31_real_minor = m; tl_log_line("es31: the driver is OpenGL ES 3.%d", m); }
+    return g_es31_real_minor;
+}
+/* the shim's buffer redirects: only on a 3.0 driver */
+static bool es31_buffers(void) { return g_es31_shim && es31_real_minor() < 1; }
+
 static bool es31_ident(int c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'; }
 
 /* The 300 es text of a 310 es shader (malloc'd), with the bindings it dropped in rec[0..*nrec). Anything else is returned as it came. */
@@ -123,6 +133,18 @@ static void w_glShaderSource(unsigned sh, int count, const char *const *str, con
     char *cat = malloc(total + 1); size_t k = 0;
     for (int i = 0; i < count; i++) if (str[i]) { size_t l = len && len[i] >= 0 ? (size_t)len[i] : strlen(str[i]); memcpy(cat + k, str[i], l); k += l; }
     cat[k] = 0;
+    /* A driver that really is 3.1 (ANGLE on the phone; the Mac's stops at 3.0): nothing is written down. A game that asked for 3.1
+     * (the shim is on) has its 300 es shaders compiled as 310 es, which gives their in/out variables explicit locations -- UE4's
+     * GLSL_ES3_1_ANDROID pairs stages by location, not by name (FNAF Security Breach quit on "'location' : invalid layout
+     * qualifier"). All of them, so the stages of a program keep one version. */
+    if (es31_real_minor() >= 1) {
+        char *v = g_es31_shim ? strstr(cat, "#version 300 es") : NULL;
+        if (v) { v[10] = '1'; v[11] = '0'; }                        /* "#version 300 es" -> "#version 310 es" */
+        const char *one = cat; int one_len = (int)k;
+        r_glShaderSource(sh, 1, &one, &one_len);
+        free(cat);
+        return;
+    }
     es31_bind rec[ES31_BINDS]; int nrec = 0;
     char *down = es31_downgrade(cat, k, rec, &nrec);
     pthread_mutex_lock(&g_es31_mu);
@@ -190,14 +212,14 @@ static void w_glGetIntegerv(unsigned pname, int *data)
 static void es31_note_storage(const char *call, unsigned target)
 {
     static atomic_int said;
-    if (g_es31_shim && target == 0x90D2 && atomic_fetch_add(&said, 1) < 12) tl_log_line("es31: %s on the storage-buffer target", call);
+    if (es31_buffers() && target == 0x90D2 && atomic_fetch_add(&said, 1) < 12) tl_log_line("es31: %s on the storage-buffer target", call);
 }
 #define ES31_UBO_MIN (1024 * 32)
 static void (*r_glBindBufferBase)(unsigned, unsigned, unsigned);
 static void w_glBindBufferBase(unsigned target, unsigned index, unsigned buffer)
 {
     es31_note_storage("glBindBufferBase", target);
-    if (g_es31_shim && target == 0x90D2 /* GL_SHADER_STORAGE_BUFFER */) {
+    if (es31_buffers() && target == 0x90D2 /* GL_SHADER_STORAGE_BUFFER */) {
         static void (*getparam)(unsigned, unsigned, int *), (*bindbuf)(unsigned, unsigned), (*bufdata)(unsigned, long, const void *, unsigned),
                     (*copysub)(unsigned, unsigned, long, long, long), (*getsub)(unsigned, long, long, void *), (*subdata)(unsigned, long, long, const void *);
         if (!getparam && a_eglGetProcAddress) {
@@ -232,15 +254,15 @@ static void w_glBindBufferBase(unsigned target, unsigned index, unsigned buffer)
 /* The other calls that name the storage target: it is the uniform one here. */
 #define ES31_STORAGE(t) ((t) == 0x90D2 ? 0x8A11u : (t))
 static void (*r_glBindBuffer)(unsigned, unsigned);
-static void w_glBindBuffer(unsigned t, unsigned b) { es31_note_storage("glBindBuffer", t); r_glBindBuffer(g_es31_shim ? ES31_STORAGE(t) : t, b); }
+static void w_glBindBuffer(unsigned t, unsigned b) { es31_note_storage("glBindBuffer", t); r_glBindBuffer(es31_buffers() ? ES31_STORAGE(t) : t, b); }
 static void (*r_glBufferData)(unsigned, long, const void *, unsigned);
-static void w_glBufferData(unsigned t, long n, const void *d, unsigned u) { es31_note_storage("glBufferData", t); r_glBufferData(g_es31_shim ? ES31_STORAGE(t) : t, n, d, u); }
+static void w_glBufferData(unsigned t, long n, const void *d, unsigned u) { es31_note_storage("glBufferData", t); r_glBufferData(es31_buffers() ? ES31_STORAGE(t) : t, n, d, u); }
 static void (*r_glBufferSubData)(unsigned, long, long, const void *);
-static void w_glBufferSubData(unsigned t, long o, long n, const void *d) { es31_note_storage("glBufferSubData", t); r_glBufferSubData(g_es31_shim ? ES31_STORAGE(t) : t, o, n, d); }
+static void w_glBufferSubData(unsigned t, long o, long n, const void *d) { es31_note_storage("glBufferSubData", t); r_glBufferSubData(es31_buffers() ? ES31_STORAGE(t) : t, o, n, d); }
 static void (*r_glBindBufferRange)(unsigned, unsigned, unsigned, long, long);
 static void w_glBindBufferRange(unsigned t, unsigned i, unsigned b, long o, long n)
 {
     es31_note_storage("glBindBufferRange", t);
-    if (g_es31_shim && t == 0x90D2) { w_glBindBufferBase(t, i, b); return; }   /* grows the buffer if need be; the whole buffer is bound */
+    if (es31_buffers() && t == 0x90D2) { w_glBindBufferBase(t, i, b); return; }   /* grows the buffer if need be; the whole buffer is bound */
     r_glBindBufferRange(t, i, b, o, n);
 }

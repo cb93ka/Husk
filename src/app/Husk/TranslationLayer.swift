@@ -57,8 +57,8 @@ extension TLReport {
         if !abis.isEmpty && !abis.contains("arm64-v8a") { return nil }
         // An app with Java code and no native code at all runs on Husk's own Java runtime
         if abis.isEmpty { return dexCount > 0 && webKind == nil ? .java : nil }
-        // Unity 6 runs through its own Java activity (UnityPlayerForActivityOrService), on the Java runtime
-        if engine == "Unity 6" { return .java }
+        // Unity 6 runs on the Unity driver too (its player natives and the Vulkan renderer are there); on the Java runtime
+        // GoreBox (Unity 6000) died at start with a store into the code region.
         if engine?.hasPrefix("Unity") == true { return .unity }
         // the cocos2d-x driver is Geometry Dash's (FMOD, RobTop's activity); other cocos2d-x games run their Java activity on the Java runtime
         if engine == "Cocos" { return libraries.contains(where: { $0.name == "libfmod.so" }) ? .cocos : .java }
@@ -189,7 +189,7 @@ final class TranslationLayerStore: ObservableObject {
 
     /// Which reading of an app's libraries its report came from. A newer Husk that recognises more (an engine, a kind of game) reads
     /// the apps it already holds again, so they are not left with what the old one knew.
-    nonisolated static let scanVersion = 8
+    nonisolated static let scanVersion = 9
     private var rescanning = false
 
     func reload() {
