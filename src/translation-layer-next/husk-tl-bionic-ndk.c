@@ -150,6 +150,8 @@ static tl_choreo *g_choreos;
 static pthread_mutex_t g_choreo_mu = PTHREAD_MUTEX_INITIALIZER;
 static atomic_llong g_vsync_time;
 
+/* The last vsync tick of Husk's clock (CLOCK_MONOTONIC ns), 0 before a Choreographer was asked for. */
+int64_t tl_vsync_last(void) { return atomic_load(&g_vsync_time); }
 static int64_t mono_ns(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (int64_t)ts.tv_sec * 1000000000ll + ts.tv_nsec; }
 
 /* What a vsync callback is given: one frame timeline, this vsync's. */

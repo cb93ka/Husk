@@ -1343,13 +1343,27 @@ static int precise_sleep(const struct timespec *req, struct timespec *rem)
     if (!tb.denom) mach_timebase_info(&tb);
     if (req->tv_sec < 0 || req->tv_nsec < 0 || req->tv_nsec >= 1000000000L) { errno = EINVAL; return -1; }
     if (req->tv_sec > 100000) return nanosleep(req, rem);                 /* "forever" */
-    static __thread int checked;
+    static __thread int checked, filter;
     if (!checked) {                     /* Swappy's ChoreographerFilter threads: Filter0, Filter1 */
         char nm[32] = ""; checked = 1;
         pthread_getname_np(pthread_self(), nm, sizeof(nm));
-        if (!strncmp(nm, "Filter", 6)) tl_thread_realtime();
+        if (!strncmp(nm, "Filter", 6)) { tl_thread_realtime(); filter = !getenv("TL_FILTER_FREE"); }
     }
     uint64_t ns = (uint64_t)req->tv_sec * 1000000000ull + (uint64_t)req->tv_nsec;
+    /* Swappy's filter sleeps to where it thinks the next vsync is, and learns the period from when the Choreographer's
+     * callbacks come relative to its wake-ups. Anything that delays it (a late wake, a slow present on MoltenVK) reads as a
+     * longer period, which makes it sleep longer: on the phone it ran down to 5-9 fps. Here its sleeps end 2 ms after Husk's
+     * next vsync tick, whatever it asked for -- its period then settles on the real one, and its work runs every frame. */
+    if (filter && ns >= 1000000 && ns < 1000000000) {
+        int64_t tl_vsync_last(void);
+        int64_t last = tl_vsync_last();
+        if (last > 0) {
+            struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
+            int64_t now = (int64_t)t.tv_sec * 1000000000ll + t.tv_nsec, next = last + 16666667ll;
+            while (next + 2000000ll <= now + 500000ll) next += 16666667ll;
+            ns = (uint64_t)(next + 2000000ll - now);
+        }
+    }
     uint64_t start = mach_absolute_time(), ticks = ns * tb.denom / tb.numer, deadline = start + ticks;
     if (mach_wait_until(deadline) == KERN_SUCCESS) { if (rem) rem->tv_sec = rem->tv_nsec = 0; return 0; }
     uint64_t now = mach_absolute_time();
