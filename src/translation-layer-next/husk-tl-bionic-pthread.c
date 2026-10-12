@@ -162,11 +162,36 @@ static int b_cond_destroy(void *g)
     memset(g, 0, 48);
     return 0;
 }
-static int b_cond_signal(void *g)    { return rc(pthread_cond_signal(obj_host(g, make_cond))); }
-static int b_cond_broadcast(void *g) { return rc(pthread_cond_broadcast(obj_host(g, make_cond))); }
+/* TL_COND_TRACE=<thread name prefix> (or 1 for all): condition variable traffic with timeouts, to see who waits for whom. */
+static bool cond_traced(void)
+{
+    static const char *f; static int init;
+    if (!init) { f = getenv("TL_COND_TRACE"); init = 1; }
+    if (!f) return false;
+    if (!strcmp(f, "1")) return true;
+    char nm[32] = ""; pthread_getname_np(pthread_self(), nm, sizeof(nm));
+    for (const char *p = f; *p;) {
+        const char *e = strchr(p, ','); size_t l = e ? (size_t)(e - p) : strlen(p);
+        if (l && !strncmp(nm, p, l)) return true;
+        if (!e) break; p = e + 1;
+    }
+    return false;
+}
+static void cond_note(const char *what, void *g, double ms, int r)
+{
+    char nm[32] = ""; pthread_getname_np(pthread_self(), nm, sizeof(nm));
+    if (ms >= 0) tl_log_line("cond[%s]: %s %p timeout %.3f ms -> %d", nm, what, g, ms, r);
+    else tl_log_line("cond[%s]: %s %p -> %d", nm, what, g, r);
+}
+static int b_cond_signal(void *g)    { int r = rc(pthread_cond_signal(obj_host(g, make_cond))); if (cond_traced()) cond_note("signal", g, -1, r); return r; }
+static int b_cond_broadcast(void *g) { int r = rc(pthread_cond_broadcast(obj_host(g, make_cond))); if (cond_traced()) cond_note("broadcast", g, -1, r); return r; }
 static int b_cond_wait(void *g, void *m)
 {
-    return rc(pthread_cond_wait(obj_host(g, make_cond), obj_host(m, make_mutex)));
+    bool tr = cond_traced();
+    if (tr) cond_note("wait", g, -1, 0);
+    int r = rc(pthread_cond_wait(obj_host(g, make_cond), obj_host(m, make_mutex)));
+    if (tr) cond_note("woke", g, -1, r);
+    return r;
 }
 
 static int b_cond_timedwait(void *g, void *m, const struct timespec *abs)
@@ -180,7 +205,9 @@ static int b_cond_timedwait(void *g, void *m, const struct timespec *abs)
     rel.tv_nsec = abs->tv_nsec - now.tv_nsec;
     if (rel.tv_nsec < 0) { rel.tv_sec--; rel.tv_nsec += 1000000000L; }
     if (rel.tv_sec < 0) { rel.tv_sec = 0; rel.tv_nsec = 0; }
-    return rc(pthread_cond_timedwait_relative_np(o->host, obj_host(m, make_mutex), &rel));
+    int r = rc(pthread_cond_timedwait_relative_np(o->host, obj_host(m, make_mutex), &rel));
+    if (cond_traced()) cond_note(clk == CLOCK_MONOTONIC ? "timedwait(mono)" : "timedwait(real)", g, rel.tv_sec * 1e3 + rel.tv_nsec / 1e6, r);
+    return r;
 }
 
 /* Bionic's clock ids: 0 is CLOCK_REALTIME, 1 CLOCK_MONOTONIC. */
@@ -194,7 +221,9 @@ static int cond_wait_until(void *g, void *m, clockid_t clk, const struct timespe
     rel.tv_nsec = abs->tv_nsec - now.tv_nsec;
     if (rel.tv_nsec < 0) { rel.tv_sec--; rel.tv_nsec += 1000000000L; }
     if (rel.tv_sec < 0) { rel.tv_sec = 0; rel.tv_nsec = 0; }
-    return rc(pthread_cond_timedwait_relative_np(o->host, obj_host(m, make_mutex), &rel));
+    int r = rc(pthread_cond_timedwait_relative_np(o->host, obj_host(m, make_mutex), &rel));
+    if (cond_traced()) cond_note(clk == CLOCK_MONOTONIC ? "waituntil(mono)" : "waituntil(real)", g, rel.tv_sec * 1e3 + rel.tv_nsec / 1e6, r);
+    return r;
 }
 
 static int b_cond_clockwait(void *g, void *m, int clock, const struct timespec *abs)

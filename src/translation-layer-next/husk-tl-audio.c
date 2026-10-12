@@ -64,6 +64,7 @@ static bool open_queue(int rate, int channels)
         A.bufs[i]->mAudioDataByteSize = FRAMES_PER_BUF * (UInt32)channels * 2;
         AudioQueueEnqueueBuffer(A.q, A.bufs[i], 0, NULL);
     }
+    if (getenv("TL_AUDIO_MUTE")) AudioQueueSetParameter(A.q, kAudioQueueParam_Volume, 0);   /* harness runs: silent */
     st = AudioQueueStart(A.q, NULL);
     if (st != noErr) { tl_log_line("audio: AudioQueueStart failed (%d)", (int)st); return false; }
     tl_log_line("audio: output running, %d Hz, %d channel(s)", rate, channels);

@@ -18,6 +18,7 @@
 #include <time.h>
 #include <sys/ucontext.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "husk-tl-jni.h"
 #include "husk-tl-ld.h"
@@ -25,6 +26,7 @@
 #include "husk-tl-gamepad.h"
 #include "husk-tl-xmem.h"
 #include "husk-tl-audio.h"
+#include "husk-tl-vulkan.h"
 
 static void dump_pushes(void);
 
@@ -335,6 +337,55 @@ static void *control_thread(void *arg)
                 if (sscanf(line + 4, "%x %f %f %f %f %f %f", &btn, &st.lx, &st.ly, &st.rx, &st.ry, &st.lt, &st.rt) >= 1) { st.buttons = btn; tl_pad_update(0, &st); }
             }
             else if (sscanf(line, "wait %ld", &ms) == 1) sleep_ms(ms);
+            else if (!strncmp(line, "regs ", 5)) {     /* regs NAME: pc, lr, fp and x0..x28 of the threads with that name */
+                char want[64]; sscanf(line + 5, "%63s", want);
+                thread_act_array_t th; mach_msg_type_number_t n;
+                if (task_threads(mach_task_self(), &th, &n) == KERN_SUCCESS) {
+                    for (mach_msg_type_number_t i = 0; i < n; i++) {
+                        char name[64] = ""; pthread_t pt = pthread_from_mach_thread_np(th[i]);
+                        if (pt) pthread_getname_np(pt, name, sizeof(name));
+                        if (strcmp(name, want)) continue;
+                        arm_thread_state64_t st; mach_msg_type_number_t cnt = ARM_THREAD_STATE64_COUNT;
+                        if (thread_get_state(th[i], ARM_THREAD_STATE64, (thread_state_t)&st, &cnt) != KERN_SUCCESS) continue;
+                        fprintf(stderr, "regs %s pc=%#llx lr=%#llx fp=%#llx\n", name, (unsigned long long)arm_thread_state64_get_pc(st),
+                                (unsigned long long)arm_thread_state64_get_lr(st), (unsigned long long)arm_thread_state64_get_fp(st));
+                        for (int r = 0; r < 29; r++) fprintf(stderr, " x%d=%#llx%s", r, (unsigned long long)st.__x[r], r % 6 == 5 ? "\n" : "");
+                        fprintf(stderr, "\n");
+                        arm_neon_state64_t ns; cnt = ARM_NEON_STATE64_COUNT;
+                        if (thread_get_state(th[i], ARM_NEON_STATE64, (thread_state_t)&ns, &cnt) == KERN_SUCCESS)
+                            for (int r = 8; r < 16; r++) { float f; double d; memcpy(&f, &ns.__v[r], 4); memcpy(&d, &ns.__v[r], 8); fprintf(stderr, " d%d=%g/%g", r, f, d); }
+                        fprintf(stderr, "\n");
+                        /* regs NAME VALUE: also where VALUE (a return address) sits on the stack, and the words after it */
+                        unsigned long long v = 0;
+                        if (sscanf(line + 5, "%*63s %llx", &v) == 1) {
+                            const uint64_t *sp = (const uint64_t *)(uintptr_t)arm_thread_state64_get_sp(st);
+                            for (int k = 0; k < 16384; k++) if (sp[k] == v) {
+                                fprintf(stderr, "  found at sp+%#x:", k * 8);
+                                for (int j = 0; j < 16; j++) fprintf(stderr, " %#llx", (unsigned long long)sp[k + j]);
+                                fprintf(stderr, "\n");
+                            }
+                        }
+                    }
+                }
+            }
+            else if (!strncmp(line, "pdump ", 6)) {    /* pdump ADDR N: N words at the pointer stored at ADDR */
+                unsigned long long a = 0; long cnt = 0; sscanf(line + 6, "%llx %ld", &a, &cnt);
+                const uint64_t *q = *(const uint64_t **)(uintptr_t)a;
+                for (long i = 0; i < cnt; i++) fprintf(stderr, "pdump %p+%#lx = %#llx\n", (const void *)q, i * 8, (unsigned long long)q[i]);
+            }
+            else if (!strncmp(line, "peek ", 5)) {     /* peek ADDR...: the 64-bit word at each address */
+                for (char *t = strtok(line + 5, " \n"); t; t = strtok(NULL, " \n")) {
+                    const uint64_t *ad = (const uint64_t *)(uintptr_t)strtoull(t, NULL, 16);
+                    fprintf(stderr, "peek %p = %#llx\n", (const void *)ad, (unsigned long long)*ad);
+                }
+            }
+            else if (!strncmp(line, "sym ", 4)) {      /* sym ADDR...: the library and nearest export of each address */
+                for (char *t = strtok(line + 4, " \n"); t; t = strtok(NULL, " \n")) {
+                    void *ad = (void *)(uintptr_t)strtoull(t, NULL, 16); const char *lib = NULL; const void *sa = NULL;
+                    const char *sym = tl_ld_symbol_at(ad, &lib, &sa);
+                    fprintf(stderr, "sym %p %s %s+%#lx\n", ad, lib ? lib : "?", sym ? sym : "?", sa ? (unsigned long)((const char *)ad - (const char *)sa) : 0ul);
+                }
+            }
             else if (sscanf(line, "shot %399s", p) == 1) {
                 char cmd[900]; snprintf(cmd, sizeof(cmd), "sips -s format png '%s/latest.bmp' --out '%s' >/dev/null 2>&1", g_frame_dir, p);
                 if (system(cmd)) fprintf(stderr, "ctl: shot failed\n");
@@ -368,18 +419,21 @@ int main(int argc, char **argv)
     { struct sigaction sd; memset(&sd, 0, sizeof(sd)); sd.sa_sigaction = on_dump; sd.sa_flags = SA_SIGINFO | SA_ONSTACK; sigemptyset(&sd.sa_mask); sigaction(SIGUSR2, &sd, NULL); }
     tl_ld_set_verbosity(getenv("TL_VERBOSE") ? atoi(getenv("TL_VERBOSE")) : 1);
     tl_jni_set_trace(getenv("TL_JNI_TRACE") ? atoi(getenv("TL_JNI_TRACE")) : 1);
-    char tmp[] = "/Volumes/GTAV/husk2/tmp/husk-unity-XXXXXX";
-    mkdtemp(tmp);
+    char tmp[600], frames[600];
+    const char *tdir = getenv("TL_TMP") ? getenv("TL_TMP") : "/Volumes/GTAV/husk2/tmp";
+    if (getenv("TL_DATA")) { snprintf(tmp, sizeof(tmp), "%s", getenv("TL_DATA")); mkdir(tmp, 0755); }
+    else { snprintf(tmp, sizeof(tmp), "%s/husk-unity-XXXXXX", tdir); mkdtemp(tmp); }
     const char *cef = "/Users/davi/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/Frameworks/Chromium Embedded Framework.framework/Versions/A/Libraries";
     char egl[600], gles[600]; snprintf(egl, sizeof(egl), "%s/libEGL.dylib", cef); snprintf(gles, sizeof(gles), "%s/libGLESv2.dylib", cef);
-    char frames[] = "/Volumes/GTAV/husk2/tmp/husk-frames-XXXXXX"; mkdtemp(frames);
+    snprintf(frames, sizeof(frames), "%s/husk-frames-XXXXXX", tdir); mkdtemp(frames);
     fprintf(stderr, "frames: %s\n", frames);
     /* TL_SPLITS: the app's split APKs, colon-separated (a Google Play install: libraries and asset packs in their own APKs) */
     if (getenv("TL_SPLITS")) { char *l = strdup(getenv("TL_SPLITS")); for (char *t = strtok(l, ":"); t; t = strtok(NULL, ":")) tl_ld_queue_split(t); }
     tl_unity_config cfg = { .apk_path = argv[1], .data_dir = tmp, .package_name = getenv("TL_PACKAGE") ? getenv("TL_PACKAGE") : "com.kiloo.subwaysurf", .width = argc > 4 ? atoi(argv[3]) : 540, .height = argc > 4 ? atoi(argv[4]) : 1200,
                             .angle_egl = getenv("TL_ANGLE_EGL") ? getenv("TL_ANGLE_EGL") : egl, .angle_gles = getenv("TL_ANGLE_GLES") ? getenv("TL_ANGLE_GLES") : gles,
-                            .frame_dir = frames, .frame_every = getenv("TL_CTL") ? -6 : 30 };
+                            .frame_dir = frames, .frame_every = getenv("TL_CTL") ? -6 : 30, .vulkan = getenv("TL_VK_LIB") != NULL };
     g_frame_dir = frames;
+    if (getenv("TL_VK_LIB")) tl_vk_configure(getenv("TL_VK_LIB"), frames, 30);
     tl_audio_install();   /* as the app does: the game's sound goes to the speakers (TL_AUDIO_MUTE=1 for a silent run) */
     if (!tl_unity_start(&cfg)) { fprintf(stderr, "unity: start failed\n"); return 1; }
     if (getenv("TL_PROBES")) install_probes();

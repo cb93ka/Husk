@@ -40,6 +40,8 @@
 #include <sys/ucontext.h>
 #include <stddef.h>
 #include <mach/mach.h>
+#include <mach/mach_time.h>
+#include <mach/thread_policy.h>
 #include <time.h>
 #include <search.h>
 #include <unistd.h>
@@ -1056,11 +1058,72 @@ static int b_gettimeofday(int64_t *tv, void *tz)
     if (tv) { tv[0] = t.tv_sec; tv[1] = t.tv_usec; }
     return 0;
 }
-static int b_nanosleep(const struct timespec *req, struct timespec *rem) { TL_ERRNO_BEGIN(); int r = nanosleep(req, rem); TL_ERRNO_END(); return r; }
-static int b_usleep(unsigned us) { return usleep(us); }
+/* A frame-pacing thread: under the time-constraint policy the kernel stops coalescing its timers -- a 16.7 ms
+ * sleep wakes within 0.05 ms instead of 6-10 ms late. Only for threads that wake, signal and sleep again. */
+void tl_thread_realtime(void)
+{
+    static mach_timebase_info_data_t tb;
+    if (!tb.denom) mach_timebase_info(&tb);
+    uint64_t ms = 1000000ull * tb.denom / tb.numer;
+    thread_time_constraint_policy_data_t p = { .period = 0, .computation = (uint32_t)(ms / 2), .constraint = (uint32_t)ms, .preemptible = 1 };
+    kern_return_t kr = thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY, (thread_policy_t)&p, THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+    if (kr != KERN_SUCCESS) tl_log_line("bionic: time-constraint policy refused (%d)", kr);
+}
+
+/* Sleeps wake on time. Darwin's nanosleep lets the kernel coalesce the timer, waking the thread 5-15 ms late
+ * (10-30% of the sleep); frame pacers that sleep to the next vsync and measure how late they woke (Swappy's
+ * ChoreographerFilter) take that as a longer refresh period and drift down to a few frames a second.
+ * mach_wait_until wakes at the deadline. */
+static int precise_sleep(const struct timespec *req, struct timespec *rem)
+{
+    static mach_timebase_info_data_t tb;
+    if (!tb.denom) mach_timebase_info(&tb);
+    if (req->tv_sec < 0 || req->tv_nsec < 0 || req->tv_nsec >= 1000000000L) { errno = EINVAL; return -1; }
+    if (req->tv_sec > 100000) return nanosleep(req, rem);                 /* "forever" */
+    static __thread int checked;
+    if (!checked) {                     /* Swappy's ChoreographerFilter threads: Filter0, Filter1 */
+        char nm[32] = ""; checked = 1;
+        pthread_getname_np(pthread_self(), nm, sizeof(nm));
+        if (!strncmp(nm, "Filter", 6)) tl_thread_realtime();
+    }
+    uint64_t ns = (uint64_t)req->tv_sec * 1000000000ull + (uint64_t)req->tv_nsec;
+    uint64_t start = mach_absolute_time(), ticks = ns * tb.denom / tb.numer, deadline = start + ticks;
+    if (mach_wait_until(deadline) == KERN_SUCCESS) { if (rem) rem->tv_sec = rem->tv_nsec = 0; return 0; }
+    uint64_t now = mach_absolute_time();
+    if (now >= deadline) { if (rem) rem->tv_sec = rem->tv_nsec = 0; return 0; }
+    if (rem) { uint64_t left = (deadline - now) * tb.numer / tb.denom; rem->tv_sec = (time_t)(left / 1000000000ull); rem->tv_nsec = (long)(left % 1000000000ull); }
+    errno = EINTR;
+    return -1;
+}
+
+/* TL_SLEEP_TRACE=<thread name prefix>: the sleeps those threads ask for. */
+static bool sleep_traced(char *nm, size_t n)
+{
+    static const char *f; static int init;
+    if (!init) { f = getenv("TL_SLEEP_TRACE"); init = 1; }
+    if (!f) return false;
+    nm[0] = 0; pthread_getname_np(pthread_self(), nm, n);
+    return !strcmp(f, "1") || !strncmp(nm, f, strlen(f));
+}
+static int b_nanosleep(const struct timespec *req, struct timespec *rem)
+{
+    char nm[32];
+    if (sleep_traced(nm, sizeof(nm))) {
+        struct timespec a, b, want = *req; clock_gettime(CLOCK_MONOTONIC, &a);
+        TL_ERRNO_BEGIN(); int r = precise_sleep(req, rem); TL_ERRNO_END();
+        clock_gettime(CLOCK_MONOTONIC, &b);
+        tl_log_line("sleep[%s]: nanosleep %.3f ms, slept %.3f", nm, want.tv_sec * 1e3 + want.tv_nsec / 1e6, (b.tv_sec - a.tv_sec) * 1e3 + (b.tv_nsec - a.tv_nsec) / 1e6);
+        return r;
+    }
+    TL_ERRNO_BEGIN(); int r = precise_sleep(req, rem); TL_ERRNO_END(); return r;
+}
+static int b_usleep(unsigned us) { struct timespec t = { us / 1000000, (long)(us % 1000000) * 1000 }; return precise_sleep(&t, NULL); }
 /* clock_nanosleep: returns the error rather than setting errno; TIMER_ABSTIME (1) sleeps until a time on that clock (Mono's threads sleep this way). */
 static int b_clock_nanosleep(int id, int flags, const struct timespec *req, struct timespec *rem)
 {
+    { char nm[32]; if (sleep_traced(nm, sizeof(nm))) { struct timespec now; clock_gettime(clock_to_darwin(id), &now);
+      double ms = (flags & 1) ? (req->tv_sec - now.tv_sec) * 1e3 + (req->tv_nsec - now.tv_nsec) / 1e6 : req->tv_sec * 1e3 + req->tv_nsec / 1e6;
+      tl_log_line("sleep[%s]: clock_nanosleep(clock %d, %s) %.3f ms", nm, id, (flags & 1) ? "until" : "for", ms); } }
     struct timespec d = *req;
     if (flags & 1) {
         struct timespec now; clock_gettime(clock_to_darwin(id), &now);
@@ -1069,7 +1132,7 @@ static int b_clock_nanosleep(int id, int flags, const struct timespec *req, stru
         if (d.tv_sec < 0) return 0;
         rem = NULL;
     }
-    return nanosleep(&d, rem) == 0 ? 0 : (errno == EINTR ? 4 : 22);
+    return precise_sleep(&d, rem) == 0 ? 0 : (errno == EINTR ? 4 : 22);
 }
 static int b_fstatfs(int fd, guest_statfs *g)
 {
@@ -1241,6 +1304,14 @@ static struct { pthread_mutex_t m; fut_waiter *head, *tail; } g_fut[FUT_BUCKETS]
 };
 
 static int g_futex_trace = -1;
+/* TL_FUTEX_TRACE=1 traces every thread; TL_FUTEX_TRACE=<name> only threads whose name starts so. */
+static bool futex_traced(void)
+{
+    const char *f = getenv("TL_FUTEX_TRACE");
+    if (!f || !strcmp(f, "1")) return true;
+    char nm[32] = ""; pthread_getname_np(pthread_self(), nm, sizeof(nm));
+    return !strncmp(nm, f, strlen(f));
+}
 
 static void fut_unlink(size_t h, fut_waiter *w)
 {
@@ -1280,7 +1351,7 @@ static long futex_call(uint32_t *addr, int op, uint32_t val, const struct timesp
         pthread_mutex_lock(&g_fut[h].m);
         long woken = fut_wake_locked(h, addr, (long)(int32_t)val);
         pthread_mutex_unlock(&g_fut[h].m);
-        if (g_futex_trace) { char nm[32] = ""; pthread_getname_np(pthread_self(), nm, sizeof(nm)); tl_log_line("futex[%s]: WAKE addr=%p n=%d woke %ld", nm, (void *)addr, (int)val, woken); }
+        if (g_futex_trace && futex_traced()) { char nm[32] = ""; pthread_getname_np(pthread_self(), nm, sizeof(nm)); tl_log_line("futex[%s]: WAKE addr=%p n=%d woke %ld", nm, (void *)addr, (int)val, woken); }
         return woken;
     }
     if (cmd == 0 || cmd == 9) {                                   /* FUTEX_WAIT / WAIT_BITSET */
@@ -1289,7 +1360,7 @@ static long futex_call(uint32_t *addr, int op, uint32_t val, const struct timesp
         fut_waiter me = { .addr = addr, .woken = false, .cv = PTHREAD_COND_INITIALIZER, .next = NULL };
         if (g_fut[h].tail) g_fut[h].tail->next = &me; else g_fut[h].head = &me;
         g_fut[h].tail = &me;
-        if (g_futex_trace) { char nm[32] = ""; pthread_getname_np(pthread_self(), nm, sizeof(nm)); tl_log_line("futex[%s]: WAIT addr=%p val=%#x", nm, (void *)addr, val); }
+        if (g_futex_trace && futex_traced()) { char nm[32] = ""; pthread_getname_np(pthread_self(), nm, sizeof(nm)); tl_log_line("futex[%s]: WAIT addr=%p val=%#x timeout %s%.3f ms", nm, (void *)addr, val, to ? "" : "none ", to ? to->tv_sec * 1e3 + to->tv_nsec / 1e6 : 0.0); }
         long r = 0;
         struct timespec rel = {0};
         if (to) {

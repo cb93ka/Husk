@@ -87,6 +87,7 @@ const char *tl_sysprop(const char *name);
 
 /* The log. */
 void tl_log_line(const char *fmt, ...);
+void tl_thread_realtime(void);           /* precise timers for a frame-pacing thread (husk-tl-bionic-io.c) */
 
 /* A one-line note, once per distinct text, for things that are stubbed. */
 void tl_note_once(const char *what);

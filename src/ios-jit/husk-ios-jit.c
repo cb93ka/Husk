@@ -581,7 +581,21 @@ static HuskDualMapping husk_ios_jit_allocate_real(size_t bytes)
                           VM_INHERIT_NONE);
         }
     }
+    /* No free slot right beside it: let the kernel find room, starting the search just above rx and then 3 GiB below it (the
+     * address passed with VM_FLAGS_ANYWHERE is where the search begins), keeping the first alias that lands within reach. */
+    const intptr_t reach = (intptr_t)3 << 30;
+    intptr_t hints[2] = { (intptr_t)rx + (intptr_t)bytes, (intptr_t)rx > reach + 0x100000000 ? (intptr_t)rx - reach : 0x100000000 };
+    for (int h = 0; h < 2 && kr != KERN_SUCCESS; h++) {
+        rw = (vm_address_t)hints[h];
+        kern_return_t k2 = vm_remap(mach_task_self(), &rw, (vm_size_t)bytes, /*mask=*/0, VM_FLAGS_ANYWHERE,
+                                    mach_task_self(), (vm_address_t)rx, /*copy=*/FALSE, &cur_prot, &max_prot, VM_INHERIT_NONE);
+        if (k2 != KERN_SUCCESS) continue;
+        intptr_t d = (intptr_t)rw - (intptr_t)rx;
+        if (d < reach && d > -reach) { kr = KERN_SUCCESS; break; }
+        vm_deallocate(mach_task_self(), rw, (vm_size_t)bytes);
+    }
     if (kr != KERN_SUCCESS) {
+        HUSK_LOG("#%llu: no room for the writable alias within 3 GiB of rx=%p; the translation layer's libraries will not load", (unsigned long long)n, rx);
         rw = 0;
         kr = vm_remap(mach_task_self(), &rw, (vm_size_t)bytes,
                       /*mask=*/0, VM_FLAGS_ANYWHERE,

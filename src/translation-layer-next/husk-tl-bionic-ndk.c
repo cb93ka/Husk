@@ -193,6 +193,7 @@ static void *choreo_clock(void *arg)
 {
     (void)arg;
     pthread_setname_np("husk-vsync");
+    tl_thread_realtime();
     int64_t next = mono_ns();
     for (;;) {
         next += VSYNC_NS;

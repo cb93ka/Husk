@@ -285,8 +285,9 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
         public CharSequence getTransformation(CharSequence s, View v) { if (s == null) return null; String up = s.toString().toUpperCase(Locale.getDefault()); if (s instanceof Spanned && up.length() == s.length()) { SpannableString ss = new SpannableString(up); TextUtils.copySpansFrom((Spanned) s, 0, s.length(), null, ss, 0); return ss; } return up; }
         public void onFocusChanged(View v, CharSequence s, boolean f, int d, Rect p) {}
     }
-    @Override protected void drawableStateChanged() { super.drawableStateChanged(); updateTextColors(); for (Drawable d : mDrawables) if (d != null && d.isStateful()) d.setState(getDrawableState()); }
+    @Override protected void drawableStateChanged() { super.drawableStateChanged(); updateTextColors(); if (mDrawables != null) for (Drawable d : mDrawables) if (d != null && d.isStateful()) d.setState(getDrawableState()); }
     private void updateTextColors() {
+        if (mTextColor == null) return;          /* called from View's constructor, before this class is set up */
         boolean inval = false;
         int[] st = getDrawableState();
         int c = mTextColor.getColorForState(st, mTextColor.getDefaultColor());
@@ -534,7 +535,8 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
     public ColorStateList getCompoundDrawableTintList() { return mDrawableTint; }
     public void setCompoundDrawableTintMode(PorterDuff.Mode m) { mDrawableTintMode = m; for (Drawable d : mDrawables) if (d != null) d.setTintMode(m); }
     public PorterDuff.Mode getCompoundDrawableTintMode() { return mDrawableTintMode; }
-    @Override protected boolean verifyDrawable(Drawable who) { for (Drawable d : mDrawables) if (d == who) return true; return super.verifyDrawable(who); }
+    /* View's constructor can get here (a tinted background invalidating itself) before this class's fields exist. */
+    @Override protected boolean verifyDrawable(Drawable who) { if (mDrawables != null) for (Drawable d : mDrawables) if (d == who) return true; return super.verifyDrawable(who); }
     private int dw(int i) { Drawable d = mDrawables[i]; return d == null ? 0 : d.getBounds().width(); }
     private int dh(int i) { Drawable d = mDrawables[i]; return d == null ? 0 : d.getBounds().height(); }
     public int getCompoundPaddingLeft() { return getPaddingLeft() + (mDrawables[0] != null ? dw(0) + mDrawablePadding : 0); }

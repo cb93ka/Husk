@@ -72,8 +72,11 @@ static char *es31_downgrade(const char *src, size_t n, es31_bind *rec, int *nrec
                     i = close + 1; continue;
                 }
             }
-            if (b && !opaque && !ssbo) {
-                char *eq = strchr(b, '='); int val = eq ? atoi(eq + 1) : -1;
+            /* layout(location = N) on a uniform is 3.1 too (explicit uniform locations): dropped, the game finds its uniforms by name. */
+            const char *dk = decl; while (*dk == ' ' || *dk == '\n' || *dk == '\t' || *dk == '\r') dk++;
+            bool uniloc = strstr(q, "location") && !strncmp(dk, "uniform", 7) && (dk[7] == ' ' || dk[7] == '\t' || dk[7] == '\n');
+            if ((b || uniloc) && !opaque && !ssbo) {
+                char *eq = b ? strchr(b, '=') : NULL; int val = eq ? atoi(eq + 1) : -1;
                 bool block = d < n && src[d] == '{';
                 if (*nrec < ES31_BINDS && val >= 0) {
                     size_t e = dl;
@@ -91,7 +94,8 @@ static char *es31_downgrade(const char *src, size_t n, es31_bind *rec, int *nrec
                     const char *comma = strchr(tok, ',');
                     size_t tl = comma ? (size_t)(comma - tok) : strlen(tok);
                     const char *t = tok; size_t tn = tl; while (tn && *t == ' ') { t++; tn--; }
-                    if (!(tn >= 7 && !strncmp(t, "binding", 7)) && tn) { if (kl) keep[kl++] = ','; memcpy(keep + kl, t, tn); kl += tn; }
+                    bool drop = (tn >= 7 && !strncmp(t, "binding", 7)) || (uniloc && tn >= 8 && !strncmp(t, "location", 8));
+                    if (!drop && tn) { if (kl) keep[kl++] = ','; memcpy(keep + kl, t, tn); kl += tn; }
                     tok = comma ? comma + 1 : NULL;
                 }
                 if (kl) { memcpy(out + o, "layout(", 7); o += 7; memcpy(out + o, keep, kl); o += kl; out[o++] = ')'; }
