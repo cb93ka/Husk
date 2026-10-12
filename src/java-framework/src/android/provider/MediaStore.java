@@ -207,7 +207,7 @@ public final class MediaStore {
     public static android.net.Uri getMediaUri(android.content.Context p0, android.net.Uri p1) { return null; }
     public static android.os.ParcelFileDescriptor getOriginalMediaFormatFileDescriptor(android.content.Context p0, android.os.ParcelFileDescriptor p1) { return null; }
     public static java.lang.String getOwnerPackageName(android.content.ContentResolver p0, int p1) { return null; }
-    public static int getPickImagesMaxLimit() { return 0; }
+    public static int getPickImagesMaxLimit() { return 100; }       /* as Android: the photo picker's limit (AndroidX checks it is above 1) */
     public static java.util.Set getRecentExternalVolumeNames(android.content.Context p0) { return new java.util.HashSet(); }
     public static java.lang.String[] getRecoveryData(android.content.ContentResolver p0) { return null; }
     public static android.net.Uri getRedactedUri(android.content.ContentResolver p0, android.net.Uri p1) { return null; }

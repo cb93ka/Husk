@@ -22,5 +22,4 @@ public abstract class CredentialProviderService extends android.app.Service {
     public abstract void onBeginGetCredential(android.service.credentials.BeginGetCredentialRequest p0, android.os.CancellationSignal p1, android.os.OutcomeReceiver p2);
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
     public abstract void onClearCredentialState(android.service.credentials.ClearCredentialStateRequest p0, android.os.CancellationSignal p1, android.os.OutcomeReceiver p2);
-    public void onCreate() {}
 }

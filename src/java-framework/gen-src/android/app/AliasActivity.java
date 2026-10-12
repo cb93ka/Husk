@@ -6,5 +6,4 @@ public class AliasActivity extends android.app.Activity {
     private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
     public java.lang.String ALIAS_META_DATA;
     public AliasActivity() { super(); }
-    public void onCreate(android.os.Bundle p0) {}
 }

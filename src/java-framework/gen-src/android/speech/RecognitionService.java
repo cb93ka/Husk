@@ -14,7 +14,6 @@ public abstract class RecognitionService extends android.app.Service {
     protected abstract void onCancel(android.speech.RecognitionService.Callback p0);
     public void onCheckRecognitionSupport(android.content.Intent p0, android.content.AttributionSource p1, android.speech.RecognitionService.SupportCallback p2) {}
     public void onCheckRecognitionSupport(android.content.Intent p0, android.speech.RecognitionService.SupportCallback p1) {}
-    public void onDestroy() {}
     protected abstract void onStartListening(android.content.Intent p0, android.speech.RecognitionService.Callback p1);
     protected abstract void onStopListening(android.speech.RecognitionService.Callback p0);
     public void onTriggerModelDownload(android.content.Intent p0) {}

@@ -25,7 +25,6 @@ public class DreamService extends android.app.Service implements android.view.Wi
     public boolean dispatchPopulateAccessibilityEvent(android.view.accessibility.AccessibilityEvent p0) { return false; }
     public boolean dispatchTouchEvent(android.view.MotionEvent p0) { return false; }
     public boolean dispatchTrackballEvent(android.view.MotionEvent p0) { return false; }
-    public void dump(java.io.FileDescriptor p0, java.io.PrintWriter p1, java.lang.String[] p2) {}
     protected void dumpOnHandler(java.io.FileDescriptor p0, java.io.PrintWriter p1, java.lang.String[] p2) {}
     public android.view.View findViewById(int p0) { return null; }
     public void finish() {}
@@ -46,10 +45,8 @@ public class DreamService extends android.app.Service implements android.view.Wi
     public void onAttachedToWindow() {}
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
     public void onContentChanged() {}
-    public void onCreate() {}
     public boolean onCreatePanelMenu(int p0, android.view.Menu p1) { return false; }
     public android.view.View onCreatePanelView(int p0) { return null; }
-    public void onDestroy() {}
     public void onDetachedFromWindow() {}
     public void onDreamingStarted() {}
     public void onDreamingStopped() {}
@@ -59,7 +56,6 @@ public class DreamService extends android.app.Service implements android.view.Wi
     public boolean onPreparePanel(int p0, android.view.View p1, android.view.Menu p2) { return false; }
     public boolean onSearchRequested() { return false; }
     public boolean onSearchRequested(android.view.SearchEvent p0) { return false; }
-    public boolean onUnbind(android.content.Intent p0) { return false; }
     public void onWakeUp() {}
     public void onWindowAttributesChanged(android.view.WindowManager.LayoutParams p0) {}
     public void onWindowFocusChanged(boolean p0) {}

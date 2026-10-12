@@ -60,7 +60,6 @@ public abstract class NotificationListenerService extends android.app.Service {
     public static void requestRebind(android.content.ComponentName p0) {}
     public static void requestUnbind(android.content.ComponentName p0) {}
     public void applyUpdateLocked(android.service.notification.NotificationRankingUpdate p0) {}
-    public void attachBaseContext(android.content.Context p0) {}
     public void cancelAllNotifications() {}
     public void cancelNotification(java.lang.String p0) {}
     public void cancelNotification(java.lang.String p0, java.lang.String p1, int p2) {}
@@ -84,7 +83,6 @@ public abstract class NotificationListenerService extends android.app.Service {
     protected boolean isBound() { return (huskProps.get("Bound") instanceof Boolean ? (Boolean) huskProps.get("Bound") : false); }
     public void migrateNotificationFilter(int p0, java.util.List p1) {}
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
-    public void onDestroy() {}
     public void onInterruptionFilterChanged(int p0) {}
     public void onListenerConnected() {}
     public void onListenerDisconnected() {}

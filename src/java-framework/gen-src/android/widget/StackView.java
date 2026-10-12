@@ -14,7 +14,6 @@ public class StackView extends android.widget.AdapterViewAnimator {
     public boolean onGenericMotionEvent(android.view.MotionEvent p0) { return false; }
     public void onInitializeAccessibilityNodeInfoInternal(android.view.accessibility.AccessibilityNodeInfo p0) {}
     public boolean onInterceptTouchEvent(android.view.MotionEvent p0) { return false; }
-    public void onLayout(boolean p0, int p1, int p2, int p3, int p4) {}
     public void onMeasure(int p0, int p1) {}
     public boolean onTouchEvent(android.view.MotionEvent p0) { return false; }
     public boolean performAccessibilityActionInternal(int p0, android.os.Bundle p1) { return false; }

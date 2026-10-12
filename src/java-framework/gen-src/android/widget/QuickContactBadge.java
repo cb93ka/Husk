@@ -15,11 +15,8 @@ public class QuickContactBadge extends android.widget.ImageView implements andro
     public void assignContactFromPhone(java.lang.String p0, boolean p1, android.os.Bundle p2) {}
     public void assignContactUri(android.net.Uri p0) {}
     public void drawableHotspotChanged(float p0, float p1) {}
-    public void drawableStateChanged() {}
-    public java.lang.CharSequence getAccessibilityClassName() { return (java.lang.CharSequence) huskProps.get("AccessibilityClassName"); }
     public void onAttachedToWindow() {}
     public void onClick(android.view.View p0) {}
-    public void onDraw(android.graphics.Canvas p0) {}
     public void setExcludeMimes(java.lang.String[] p0) { huskProps.put("ExcludeMimes", p0); }
     public void setImageToDefault() {}
     public void setMode(int p0) { huskProps.put("Mode", Integer.valueOf(p0)); }

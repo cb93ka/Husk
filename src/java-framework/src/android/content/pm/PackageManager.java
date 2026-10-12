@@ -37,15 +37,20 @@ public class PackageManager {
     private static PackageManager sSelf;
     public static synchronized PackageManager self() { if (sSelf == null) sSelf = new PackageManager(); return sSelf; }
     private static boolean mine(String pkg) { return pkg != null && pkg.equals(husk.Native.packageName()); }
+    /* the process a component names (android:process: ":x" is the app's own "<package>:x"), the app's process when it names none */
+    private static String process(husk.Manifest.Component c) {
+        String pkg = husk.Native.packageName();
+        return c.process == null || c.process.isEmpty() ? pkg : c.process.startsWith(":") ? pkg + c.process : c.process;
+    }
     private static ActivityInfo activity(husk.Manifest.Component c) {
         ActivityInfo a = new ActivityInfo();
         a.name = c.name; a.packageName = husk.Native.packageName(); a.theme = c.theme; a.labelRes = c.label; a.icon = c.icon; a.screenOrientation = c.screenOrientation;
         a.configChanges = c.configChanges; a.launchMode = c.launchMode; a.exported = c.exported; a.enabled = c.enabled; a.metaData = c.metaData; a.parentActivityName = c.parentActivity;
-        a.softInputMode = c.windowSoftInputMode; a.processName = a.packageName; a.taskAffinity = a.packageName;
+        a.softInputMode = c.windowSoftInputMode; a.processName = process(c); a.taskAffinity = a.packageName;
         return a;
     }
-    private static ServiceInfo service(husk.Manifest.Component c) { ServiceInfo s = new ServiceInfo(); s.name = c.name; s.packageName = husk.Native.packageName(); s.exported = c.exported; s.enabled = c.enabled; s.metaData = c.metaData; s.permission = c.permission; return s; }
-    private static ProviderInfo provider(husk.Manifest.Component c) { ProviderInfo p = new ProviderInfo(); p.name = c.name; p.packageName = husk.Native.packageName(); p.authority = c.authorities; p.exported = c.exported; p.metaData = c.metaData; return p; }
+    private static ServiceInfo service(husk.Manifest.Component c) { ServiceInfo s = new ServiceInfo(); s.name = c.name; s.packageName = husk.Native.packageName(); s.exported = c.exported; s.enabled = c.enabled; s.metaData = c.metaData; s.permission = c.permission; s.processName = process(c); return s; }
+    private static ProviderInfo provider(husk.Manifest.Component c) { ProviderInfo p = new ProviderInfo(); p.name = c.name; p.packageName = husk.Native.packageName(); p.authority = c.authorities; p.exported = c.exported; p.metaData = c.metaData; p.processName = process(c); return p; }
     public PackageInfo getPackageInfo(String pkg, int flags) throws NameNotFoundException {
         if ("android".equals(pkg)) {
             // the platform itself (okhttp, Play libraries and WebView checks read its version)
@@ -138,9 +143,30 @@ public class PackageManager {
     public List<ResolveInfo> queryIntentActivities(Intent i, ResolveInfoFlags flags) { return queryIntentActivities(i, 0); }
     public ResolveInfo resolveActivity(Intent i, int flags) { List<ResolveInfo> l = queryIntentActivities(i, flags); return l.isEmpty() ? null : l.get(0); }
     public ResolveInfo resolveActivity(Intent i, ResolveInfoFlags flags) { return resolveActivity(i, 0); }
-    public ResolveInfo resolveService(Intent i, int flags) { return null; }
-    public List<ResolveInfo> queryIntentServices(Intent i, int flags) { return new ArrayList<>(); }
-    public List<ResolveInfo> queryBroadcastReceivers(Intent i, int flags) { return new ArrayList<>(); }
+    public ResolveInfo resolveService(Intent i, int flags) { List<ResolveInfo> l = queryIntentServices(i, flags); return l.isEmpty() ? null : l.get(0); }
+    /** The app's own services the intent reaches; and an intent meant for Google Play services (push registration, its APIs)
+     *  resolves to it, as it is installed (husk.GooglePackages) -- apps take the first answer without checking for none. */
+    public List<ResolveInfo> queryIntentServices(Intent i, int flags) {
+        ArrayList<ResolveInfo> l = new ArrayList<>();
+        for (husk.Manifest.Component c : husk.Manifest.match(husk.Manifest.services, i)) { ResolveInfo r = new ResolveInfo(); r.serviceInfo = service(c); l.add(r); }
+        if (l.isEmpty() && googleService(i)) {
+            ResolveInfo r = new ResolveInfo(); ServiceInfo s = new ServiceInfo();
+            s.packageName = "com.google.android.gms"; s.name = "com.google.android.gms.chimera.GmsIntentOperationService"; s.exported = true; s.enabled = true;
+            try { s.applicationInfo = husk.GooglePackages.applicationInfo(s.packageName); } catch (Exception e) {}
+            r.serviceInfo = s; l.add(r);
+        }
+        return l;
+    }
+    private static boolean googleService(Intent i) {
+        String p = i.getComponent() != null ? i.getComponent().getPackageName() : i.getPackage();
+        String a = i.getAction();
+        return "com.google.android.gms".equals(p) || (a != null && (a.startsWith("com.google.android.c2dm.intent.") || a.startsWith("com.google.android.gms.") || a.startsWith("com.google.firebase.")));
+    }
+    public List<ResolveInfo> queryBroadcastReceivers(Intent i, int flags) {
+        ArrayList<ResolveInfo> l = new ArrayList<>();
+        for (husk.Manifest.Component c : husk.Manifest.match(husk.Manifest.receivers, i)) { ResolveInfo r = new ResolveInfo(); r.activityInfo = activity(c); l.add(r); }
+        return l;
+    }
     public List<ResolveInfo> queryIntentContentProviders(Intent i, int flags) { return new ArrayList<>(); }
     public Intent getLaunchIntentForPackage(String pkg) {
         if (!mine(pkg)) return null;
@@ -154,8 +180,42 @@ public class PackageManager {
     public String[] getPackagesForUid(int uid) { return new String[] { husk.Native.packageName() }; }
     public String getNameForUid(int uid) { return husk.Native.packageName(); }
     public int getPackageUid(String pkg, int flags) throws NameNotFoundException { if (husk.GooglePackages.is(pkg)) return husk.GooglePackages.applicationInfo(pkg).uid; if (!mine(pkg)) throw new NameNotFoundException(pkg); return android.os.Process.myUid(); }
-    public void setComponentEnabledSetting(ComponentName c, int state, int flags) {}
-    public int getComponentEnabledSetting(ComponentName c) { return COMPONENT_ENABLED_STATE_DEFAULT; }
+    /* components the app enabled or disabled (Instagram turns its own on in stages and checks each took), kept across launches */
+    private static java.util.Properties sStates;
+    private static synchronized java.util.Properties states() {
+        if (sStates == null) {
+            sStates = new java.util.Properties();
+            try (java.io.FileInputStream in = new java.io.FileInputStream(stateFile())) { sStates.load(in); } catch (Exception e) {}
+        }
+        return sStates;
+    }
+    private static java.io.File stateFile() { return new java.io.File(ApplicationInfo.self().dataDir, ".husk-component-states"); }
+    public void setComponentEnabledSetting(ComponentName c, int state, int flags) {
+        if (c == null) return;
+        synchronized (PackageManager.class) {
+            java.util.Properties p = states();
+            String k = c.flattenToString(), v = Integer.toString(state);
+            if (state == COMPONENT_ENABLED_STATE_DEFAULT ? p.remove(k) == null : v.equals(p.setProperty(k, v))) return;    /* unchanged */
+            /* written once, shortly after a burst of changes (apps set hundreds at start-up) */
+            if (sSavePending) return;
+            sSavePending = true;
+        }
+        new Thread(() -> {
+            try { Thread.sleep(500); } catch (InterruptedException e) {}
+            synchronized (PackageManager.class) {
+                sSavePending = false;
+                try (java.io.FileOutputStream out = new java.io.FileOutputStream(stateFile())) { sStates.store(out, null); } catch (Exception e) {}
+            }
+        }, "husk-component-states").start();
+    }
+    private static boolean sSavePending;
+    public void setComponentEnabledSettings(java.util.List settings) {
+        for (Object o : settings) { ComponentEnabledSetting s = (ComponentEnabledSetting) o; setComponentEnabledSetting(s.getComponentName(), s.getEnabledState(), s.getEnabledFlags()); }
+    }
+    public int getComponentEnabledSetting(ComponentName c) {
+        if (c == null) return COMPONENT_ENABLED_STATE_DEFAULT;
+        synchronized (PackageManager.class) { String v = states().getProperty(c.flattenToString()); return v == null ? COMPONENT_ENABLED_STATE_DEFAULT : Integer.parseInt(v); }
+    }
     public void setApplicationEnabledSetting(String pkg, int state, int flags) {}
     public int getApplicationEnabledSetting(String pkg) { return COMPONENT_ENABLED_STATE_DEFAULT; }
     public boolean isSafeMode() { return false; }
@@ -173,89 +233,6 @@ public class PackageManager {
     public void addPermissionHusk() {}
     public Bundle_ getSuspendedPackageAppExtrasHusk() { return null; }
     interface Bundle_ {}
-    // ---- generated by tools/compat/genstubs.py: the platform's nested classes this class does not write
-    public static final class ComponentEnabledSetting implements android.os.Parcelable {
-        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
-        public static android.os.Parcelable.Creator CREATOR;
-        public ComponentEnabledSetting(android.content.ComponentName p0, int p1, int p2) {}
-        public ComponentEnabledSetting(java.lang.String p0, int p1, int p2) {}
-        public int describeContents() { return 0; }
-        public java.lang.String getClassName() { return (java.lang.String) huskProps.get("ClassName"); }
-        public android.content.ComponentName getComponentName() { return (android.content.ComponentName) huskProps.get("ComponentName"); }
-        public int getEnabledFlags() { return (huskProps.get("EnabledFlags") instanceof Integer ? (Integer) huskProps.get("EnabledFlags") : 0); }
-        public int getEnabledState() { return (huskProps.get("EnabledState") instanceof Integer ? (Integer) huskProps.get("EnabledState") : 0); }
-        public java.lang.String getPackageName() { return (java.lang.String) huskProps.get("PackageName"); }
-        public boolean isComponent() { return (huskProps.get("Component") instanceof Boolean ? (Boolean) huskProps.get("Component") : false); }
-        public void writeToParcel(android.os.Parcel p0, int p1) {}
-        ComponentEnabledSetting() { this((android.content.ComponentName) null, (int) 0, (int) 0); }
-    }
-    public static abstract class DexModuleRegisterCallback {
-        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
-        public DexModuleRegisterCallback() {}
-        public abstract void onDexModuleRegistered(java.lang.String p0, boolean p1, java.lang.String p2);
-    }
-    public static class Flags {
-        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
-        protected Flags(long p0) {}
-        public long getValue() { return (huskProps.get("Value") instanceof Long ? (Long) huskProps.get("Value") : 0L); }
-        Flags() { this((long) 0L); }
-    }
-    public static abstract class LegacyPackageDeleteObserver extends android.app.PackageDeleteObserver {
-        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
-        public LegacyPackageDeleteObserver(android.content.pm.IPackageDeleteObserver p0) { super(); }
-        public void onPackageDeleted(java.lang.String p0, int p1, java.lang.String p2) {}
-        LegacyPackageDeleteObserver() { this((android.content.pm.IPackageDeleteObserver) null); }
-    }
-    public static abstract class MoveCallback {
-        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
-        public MoveCallback() {}
-        public void onCreated(int p0, android.os.Bundle p1) {}
-        public abstract void onStatusChanged(int p0, int p1, long p2);
-    }
-    public interface OnChecksumsReadyListener {
-        void onChecksumsReady(java.util.List p0);
-    }
-    public interface OnPermissionsChangedListener {
-        void onPermissionsChanged(int p0);
-        default void onPermissionsChanged(int p0, java.lang.String p1) {}
-    }
-    public static final class Property implements android.os.Parcelable {
-        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
-        public static android.os.Parcelable.Creator CREATOR;
-        public Property(java.lang.String p0, float p1, java.lang.String p2, java.lang.String p3) {}
-        public Property(java.lang.String p0, int p1, java.lang.String p2, java.lang.String p3) {}
-        public Property(java.lang.String p0, int p1, boolean p2, java.lang.String p3, java.lang.String p4) {}
-        public Property(java.lang.String p0, java.lang.String p1, java.lang.String p2, java.lang.String p3) {}
-        public Property(java.lang.String p0, boolean p1, java.lang.String p2, java.lang.String p3) {}
-        public int describeContents() { return 0; }
-        public boolean getBoolean() { return (huskProps.get("Boolean") instanceof Boolean ? (Boolean) huskProps.get("Boolean") : false); }
-        public java.lang.String getClassName() { return (java.lang.String) huskProps.get("ClassName"); }
-        public float getFloat() { return (huskProps.get("Float") instanceof Float ? (Float) huskProps.get("Float") : 0f); }
-        public int getInteger() { return (huskProps.get("Integer") instanceof Integer ? (Integer) huskProps.get("Integer") : 0); }
-        public java.lang.String getName() { return (java.lang.String) huskProps.get("Name"); }
-        public java.lang.String getPackageName() { return (java.lang.String) huskProps.get("PackageName"); }
-        public int getResourceId() { return (huskProps.get("ResourceId") instanceof Integer ? (Integer) huskProps.get("ResourceId") : 0); }
-        public java.lang.String getString() { return (java.lang.String) huskProps.get("String"); }
-        public int getType() { return (huskProps.get("Type") instanceof Integer ? (Integer) huskProps.get("Type") : 0); }
-        public boolean isBoolean() { return (huskProps.get("Boolean") instanceof Boolean ? (Boolean) huskProps.get("Boolean") : false); }
-        public boolean isFloat() { return (huskProps.get("Float") instanceof Boolean ? (Boolean) huskProps.get("Float") : false); }
-        public boolean isInteger() { return (huskProps.get("Integer") instanceof Boolean ? (Boolean) huskProps.get("Integer") : false); }
-        public boolean isResourceId() { return (huskProps.get("ResourceId") instanceof Boolean ? (Boolean) huskProps.get("ResourceId") : false); }
-        public boolean isString() { return (huskProps.get("String") instanceof Boolean ? (Boolean) huskProps.get("String") : false); }
-        public android.os.Bundle toBundle(android.os.Bundle p0) { return null; }
-        public void writeToParcel(android.os.Parcel p0, int p1) {}
-        Property() { this((java.lang.String) null, (float) 0f, (java.lang.String) null, (java.lang.String) null); }
-    }
-    public static final class UninstallCompleteCallback implements android.os.Parcelable {
-        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
-        public static android.os.Parcelable.Creator CREATOR;
-        public UninstallCompleteCallback(android.os.IBinder p0) {}
-        public int describeContents() { return 0; }
-        public void onUninstallComplete(java.lang.String p0, int p1, java.lang.String p2) {}
-        public void writeToParcel(android.os.Parcel p0, int p1) {}
-        UninstallCompleteCallback() { this((android.os.IBinder) null); }
-    }
-    // ---- end of generated nested classes
     // ---- generated by tools/compat/fillmembers.py: the platform's members this class does not write (signatures only)
     private final java.util.HashMap<String, Object> huskFill = new java.util.HashMap<>();
     public static final java.lang.String ACTION_REQUEST_PERMISSIONS = "android.content.pm.action.REQUEST_PERMISSIONS";
@@ -909,7 +886,6 @@ public class PackageManager {
     public void setApplicationCategoryHint(java.lang.String p0, int p1) {}
     public boolean setApplicationHiddenSettingAsUser(java.lang.String p0, boolean p1, android.os.UserHandle p2) { return false; }
     public boolean setAutoRevokeWhitelisted(java.lang.String p0, boolean p1) { return false; }
-    public void setComponentEnabledSettings(java.util.List p0) {}
     public boolean setDefaultBrowserPackageNameAsUser(java.lang.String p0, int p1) { return false; }
     public java.lang.String[] setDistractingPackageRestrictions(java.lang.String[] p0, int p1) { return null; }
     public void setHarmfulAppWarning(java.lang.String p0, java.lang.CharSequence p1) {}
@@ -932,4 +908,87 @@ public class PackageManager {
     public void verifyIntentFilter(int p0, int p1, java.util.List p2) {}
     public void verifyPendingInstall(int p0, int p1) {}
     // ---- end of generated members
+    // ---- generated by tools/compat/genstubs.py: the platform's nested classes this class does not write
+    public static final class ComponentEnabledSetting implements android.os.Parcelable {
+        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
+        public static android.os.Parcelable.Creator CREATOR;
+        public ComponentEnabledSetting(android.content.ComponentName p0, int p1, int p2) { huskProps.put("ComponentName", p0); huskProps.put("EnabledState", p1); huskProps.put("EnabledFlags", p2); }
+        public ComponentEnabledSetting(java.lang.String p0, int p1, int p2) {}
+        public int describeContents() { return 0; }
+        public java.lang.String getClassName() { return (java.lang.String) huskProps.get("ClassName"); }
+        public android.content.ComponentName getComponentName() { return (android.content.ComponentName) huskProps.get("ComponentName"); }
+        public int getEnabledFlags() { return (huskProps.get("EnabledFlags") instanceof Integer ? (Integer) huskProps.get("EnabledFlags") : 0); }
+        public int getEnabledState() { return (huskProps.get("EnabledState") instanceof Integer ? (Integer) huskProps.get("EnabledState") : 0); }
+        public java.lang.String getPackageName() { return (java.lang.String) huskProps.get("PackageName"); }
+        public boolean isComponent() { return (huskProps.get("Component") instanceof Boolean ? (Boolean) huskProps.get("Component") : false); }
+        public void writeToParcel(android.os.Parcel p0, int p1) {}
+        ComponentEnabledSetting() { this((android.content.ComponentName) null, (int) 0, (int) 0); }
+    }
+    public static abstract class DexModuleRegisterCallback {
+        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
+        public DexModuleRegisterCallback() {}
+        public abstract void onDexModuleRegistered(java.lang.String p0, boolean p1, java.lang.String p2);
+    }
+    public static class Flags {
+        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
+        protected Flags(long p0) {}
+        public long getValue() { return (huskProps.get("Value") instanceof Long ? (Long) huskProps.get("Value") : 0L); }
+        Flags() { this((long) 0L); }
+    }
+    public static abstract class LegacyPackageDeleteObserver extends android.app.PackageDeleteObserver {
+        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
+        public LegacyPackageDeleteObserver(android.content.pm.IPackageDeleteObserver p0) { super(); }
+        public void onPackageDeleted(java.lang.String p0, int p1, java.lang.String p2) {}
+        LegacyPackageDeleteObserver() { this((android.content.pm.IPackageDeleteObserver) null); }
+    }
+    public static abstract class MoveCallback {
+        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
+        public MoveCallback() {}
+        public void onCreated(int p0, android.os.Bundle p1) {}
+        public abstract void onStatusChanged(int p0, int p1, long p2);
+    }
+    public interface OnChecksumsReadyListener {
+        void onChecksumsReady(java.util.List p0);
+    }
+    public interface OnPermissionsChangedListener {
+        void onPermissionsChanged(int p0);
+        default void onPermissionsChanged(int p0, java.lang.String p1) {}
+    }
+    public static final class Property implements android.os.Parcelable {
+        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
+        public static android.os.Parcelable.Creator CREATOR;
+        public Property(java.lang.String p0, float p1, java.lang.String p2, java.lang.String p3) {}
+        public Property(java.lang.String p0, int p1, java.lang.String p2, java.lang.String p3) {}
+        public Property(java.lang.String p0, int p1, boolean p2, java.lang.String p3, java.lang.String p4) {}
+        public Property(java.lang.String p0, java.lang.String p1, java.lang.String p2, java.lang.String p3) {}
+        public Property(java.lang.String p0, boolean p1, java.lang.String p2, java.lang.String p3) {}
+        public int describeContents() { return 0; }
+        public boolean getBoolean() { return (huskProps.get("Boolean") instanceof Boolean ? (Boolean) huskProps.get("Boolean") : false); }
+        public java.lang.String getClassName() { return (java.lang.String) huskProps.get("ClassName"); }
+        public float getFloat() { return (huskProps.get("Float") instanceof Float ? (Float) huskProps.get("Float") : 0f); }
+        public int getInteger() { return (huskProps.get("Integer") instanceof Integer ? (Integer) huskProps.get("Integer") : 0); }
+        public java.lang.String getName() { return (java.lang.String) huskProps.get("Name"); }
+        public java.lang.String getPackageName() { return (java.lang.String) huskProps.get("PackageName"); }
+        public int getResourceId() { return (huskProps.get("ResourceId") instanceof Integer ? (Integer) huskProps.get("ResourceId") : 0); }
+        public java.lang.String getString() { return (java.lang.String) huskProps.get("String"); }
+        public int getType() { return (huskProps.get("Type") instanceof Integer ? (Integer) huskProps.get("Type") : 0); }
+        public boolean isBoolean() { return (huskProps.get("Boolean") instanceof Boolean ? (Boolean) huskProps.get("Boolean") : false); }
+        public boolean isFloat() { return (huskProps.get("Float") instanceof Boolean ? (Boolean) huskProps.get("Float") : false); }
+        public boolean isInteger() { return (huskProps.get("Integer") instanceof Boolean ? (Boolean) huskProps.get("Integer") : false); }
+        public boolean isResourceId() { return (huskProps.get("ResourceId") instanceof Boolean ? (Boolean) huskProps.get("ResourceId") : false); }
+        public boolean isString() { return (huskProps.get("String") instanceof Boolean ? (Boolean) huskProps.get("String") : false); }
+        public android.os.Bundle toBundle(android.os.Bundle p0) { return null; }
+        public void writeToParcel(android.os.Parcel p0, int p1) {}
+        Property() { this((java.lang.String) null, (float) 0f, (java.lang.String) null, (java.lang.String) null); }
+    }
+    public static final class UninstallCompleteCallback implements android.os.Parcelable {
+        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
+        public static android.os.Parcelable.Creator CREATOR;
+        public UninstallCompleteCallback(android.os.IBinder p0) {}
+        public int describeContents() { return 0; }
+        public void onUninstallComplete(java.lang.String p0, int p1, java.lang.String p2) {}
+        public void writeToParcel(android.os.Parcel p0, int p1) {}
+        UninstallCompleteCallback() { this((android.os.IBinder) null); }
+    }
+    // ---- end of generated nested classes
 }

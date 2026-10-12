@@ -3,7 +3,7 @@ package android.webkit;
 /** What a WebView's getSettings() returns: every setting kept, the ones WebKit honours passed on to it. */
 @SuppressWarnings({"unchecked", "rawtypes", "deprecation"})
 final class HuskWebSettings extends WebSettings {
-    static final String DEFAULT_UA = "Mozilla/5.0 (Linux; Android 14; Husk; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.0.0 Mobile Safari/537.36";
+    static final String DEFAULT_UA = "Mozilla/5.0 (Linux; Android 14; Husk; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.0.0 Mobile Safari/537.36";
     private final java.util.HashMap<String, Object> mValues = new java.util.HashMap<>();
     private final Runnable mChanged;
     HuskWebSettings(Runnable changed) { mChanged = changed; }

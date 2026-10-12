@@ -14,7 +14,6 @@ public class InputMethodService extends android.inputmethodservice.AbstractInput
     public static final int IME_VISIBLE = 2;
     public InputMethodService() { super(); }
     public static java.time.Duration getStylusHandwritingIdleTimeoutMax() { return null; }
-    public void dump(java.io.FileDescriptor p0, java.io.PrintWriter p1, java.lang.String[] p2) {}
     public boolean enableHardwareAcceleration() { return false; }
     public void finishConnectionlessStylusHandwriting(java.lang.CharSequence p0) {}
     public void finishStylusHandwriting() {}
@@ -42,9 +41,7 @@ public class InputMethodService extends android.inputmethodservice.AbstractInput
     public void onAppPrivateCommand(java.lang.String p0, android.os.Bundle p1) {}
     public void onBindInput() {}
     public void onComputeInsets(android.inputmethodservice.InputMethodService.Insets p0) {}
-    public void onConfigurationChanged(android.content.res.Configuration p0) {}
     public void onConfigureWindow(android.view.Window p0, boolean p1, boolean p2) {}
-    public void onCreate() {}
     public android.view.View onCreateCandidatesView() { return null; }
     public android.view.View onCreateExtractTextView() { return null; }
     public android.view.inputmethod.InlineSuggestionsRequest onCreateInlineSuggestionsRequest(android.os.Bundle p0) { return null; }
@@ -53,7 +50,6 @@ public class InputMethodService extends android.inputmethodservice.AbstractInput
     public android.view.View onCreateInputView() { return null; }
     protected void onCurrentInputMethodSubtypeChanged(android.view.inputmethod.InputMethodSubtype p0) {}
     public void onCustomImeSwitcherButtonRequestedVisible(boolean p0) {}
-    public void onDestroy() {}
     public void onDisplayCompletions(android.view.inputmethod.CompletionInfo[] p0) {}
     public boolean onEvaluateFullscreenMode() { return false; }
     public boolean onEvaluateInputViewShown() { return false; }
@@ -110,7 +106,6 @@ public class InputMethodService extends android.inputmethodservice.AbstractInput
     public void setInputView(android.view.View p0) { huskProps.put("InputView", p0); }
     public void setStylusHandwritingRegion(android.graphics.Region p0) { huskProps.put("StylusHandwritingRegion", p0); }
     public void setStylusHandwritingSessionTimeout(java.time.Duration p0) { huskProps.put("StylusHandwritingSessionTimeout", p0); }
-    public void setTheme(int p0) { huskProps.put("Theme", Integer.valueOf(p0)); }
     public boolean shouldOfferSwitchingToNextInputMethod() { return false; }
     public void showStatusIcon(int p0) {}
     public void showWindow(boolean p0) {}

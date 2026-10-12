@@ -7,11 +7,6 @@ public class TabActivity extends android.app.ActivityGroup {
     public TabActivity() { super(); }
     public android.widget.TabHost getTabHost() { return (android.widget.TabHost) huskProps.get("TabHost"); }
     public android.widget.TabWidget getTabWidget() { return (android.widget.TabWidget) huskProps.get("TabWidget"); }
-    public void onChildTitleChanged(android.app.Activity p0, java.lang.CharSequence p1) {}
-    public void onContentChanged() {}
-    public void onPostCreate(android.os.Bundle p0) {}
-    public void onRestoreInstanceState(android.os.Bundle p0) {}
-    public void onSaveInstanceState(android.os.Bundle p0) {}
     public void setDefaultTab(int p0) { huskProps.put("DefaultTab", Integer.valueOf(p0)); }
     public void setDefaultTab(java.lang.String p0) { huskProps.put("DefaultTab", p0); }
 }

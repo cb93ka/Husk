@@ -78,6 +78,7 @@ private struct AppWindow: View {
     let container: CGSize
     @ObservedObject private var windows = AppWindows.shared
     @StateObject private var model = TLUnityModel()
+    @State private var stoppedWhy: AppDiagnosis?
     /// The frame as a drag or a resize began.
     @State private var startFrame: CGRect?
 
@@ -149,11 +150,15 @@ private struct AppWindow: View {
             if n > 600, model.state == Int32(HUSK_UNITY_RUNNING) { GameStatusStore.shared.record(app.id, .plays) }
         }
         .onChange(of: model.state) { st in
-            if st == Int32(HUSK_UNITY_FAILED) { GameStatusStore.shared.record(app.id, .failed) }
+            if st == Int32(HUSK_UNITY_FAILED) || st == Int32(HUSK_UNITY_ENDED), stoppedWhy == nil, let d = AppDiagnosis.ofCurrentRun() {
+                stoppedWhy = d
+                GameStatusStore.shared.record(app.id, st == Int32(HUSK_UNITY_FAILED) ? .failed : .crashed, diagnosis: d)
+            } else if st == Int32(HUSK_UNITY_FAILED) { GameStatusStore.shared.record(app.id, .failed) }
             // The game quit from its own menu: the window goes (shrinking away) instead of keeping the last frame.
-            if st == Int32(HUSK_UNITY_ENDED), model.frames >= 2 { withAnimation(.easeIn(duration: 0.3)) { windows.close() } }
+            else if st == Int32(HUSK_UNITY_ENDED), model.frames >= 2 { withAnimation(.easeIn(duration: 0.3)) { windows.close() } }
         }
         .onReceive(NotificationCenter.default.publisher(for: TLUnityUIView.appClosedItself)) { _ in windows.close() }
+        .overlay { if let d = stoppedWhy { AppStoppedOverlay(app: app, diagnosis: d) { windows.close() } } }
         .onReceive(NotificationCenter.default.publisher(for: WebAppRuntime.closed)) { n in
             if (n.object as? String) == app.id { windows.close() }
         }

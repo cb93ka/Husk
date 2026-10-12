@@ -8,7 +8,6 @@ public class TwoLineListItem extends android.widget.RelativeLayout {
     public TwoLineListItem(android.content.Context p0, android.util.AttributeSet p1) { super(p0, p1); }
     public TwoLineListItem(android.content.Context p0, android.util.AttributeSet p1, int p2) { super(p0, p1, p2); }
     public TwoLineListItem(android.content.Context p0, android.util.AttributeSet p1, int p2, int p3) { super(p0, p1, p2, p3); }
-    public java.lang.CharSequence getAccessibilityClassName() { return (java.lang.CharSequence) huskProps.get("AccessibilityClassName"); }
     public android.widget.TextView getText1() { return (android.widget.TextView) huskProps.get("Text1"); }
     public android.widget.TextView getText2() { return (android.widget.TextView) huskProps.get("Text2"); }
     public void onFinishInflate() {}

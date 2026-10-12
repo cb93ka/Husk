@@ -104,8 +104,6 @@ public abstract class AccessibilityService extends android.app.Service {
     public void attachAccessibilityOverlayToWindow(int p0, android.view.SurfaceControl p1, java.util.concurrent.Executor p2, java.util.function.IntConsumer p3) {}
     public boolean clearCache() { return false; }
     public boolean clearCachedSubtree(android.view.accessibility.AccessibilityNodeInfo p0) { return false; }
-    public android.content.Context createDisplayContext(android.view.Display p0) { return null; }
-    public android.content.Context createWindowContext(int p0, android.os.Bundle p1) { return null; }
     public android.content.Context createWindowContext(android.view.Display p0, int p1, android.os.Bundle p2) { return null; }
     public void disableSelf() {}
     public boolean dispatchGesture(android.accessibilityservice.GestureDescription p0, android.accessibilityservice.AccessibilityService.GestureResultCallback p1, android.os.Handler p2) { return false; }
@@ -123,7 +121,6 @@ public abstract class AccessibilityService extends android.app.Service {
     public android.accessibilityservice.AccessibilityServiceInfo getServiceInfo() { return (android.accessibilityservice.AccessibilityServiceInfo) huskProps.get("ServiceInfo"); }
     public android.accessibilityservice.AccessibilityService.SoftKeyboardController getSoftKeyboardController() { return (android.accessibilityservice.AccessibilityService.SoftKeyboardController) huskProps.get("SoftKeyboardController"); }
     public java.util.List getSystemActions() { return (huskProps.get("SystemActions") != null ? (java.util.List) huskProps.get("SystemActions") : new java.util.ArrayList()); }
-    public java.lang.Object getSystemService(java.lang.String p0) { return null; }
     public android.accessibilityservice.TouchInteractionController getTouchInteractionController(int p0) { return null; }
     public java.util.List getWindows() { return (huskProps.get("Windows") != null ? (java.util.List) huskProps.get("Windows") : new java.util.ArrayList()); }
     public android.util.SparseArray getWindowsOnAllDisplays() { return (android.util.SparseArray) huskProps.get("WindowsOnAllDisplays"); }

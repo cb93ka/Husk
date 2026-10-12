@@ -21,7 +21,6 @@ public class Virtualizer extends android.media.audiofx.AudioEffect {
     public boolean getSpeakerAngles(int p0, int p1, int[] p2) { return false; }
     public boolean getStrengthSupported() { return (huskProps.get("StrengthSupported") instanceof Boolean ? (Boolean) huskProps.get("StrengthSupported") : false); }
     public int getVirtualizationMode() { return (huskProps.get("VirtualizationMode") instanceof Integer ? (Integer) huskProps.get("VirtualizationMode") : 0); }
-    public void setParameterListener(android.media.audiofx.Virtualizer.OnParameterChangeListener p0) { huskProps.put("ParameterListener", p0); }
     public void setProperties(android.media.audiofx.Virtualizer.Settings p0) { huskProps.put("Properties", p0); }
     public void setStrength(short p0) { huskProps.put("Strength", Short.valueOf(p0)); }
     Virtualizer() { this((int) 0, (int) 0); }

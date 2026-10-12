@@ -5,9 +5,6 @@ package android.provider;
 public abstract class CloudMediaProvider extends android.content.ContentProvider {
     private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
     public CloudMediaProvider() { super(); }
-    public void attachInfo(android.content.Context p0, android.content.pm.ProviderInfo p1) {}
-    public android.os.Bundle call(java.lang.String p0, java.lang.String p1, android.os.Bundle p2) { return null; }
-    public android.net.Uri canonicalize(android.net.Uri p0) { return null; }
     public int delete(android.net.Uri p0, java.lang.String p1, java.lang.String[] p2) { return 0; }
     public java.lang.String getType(android.net.Uri p0) { return null; }
     public android.net.Uri insert(android.net.Uri p0, android.content.ContentValues p1) { return null; }
@@ -26,13 +23,8 @@ public abstract class CloudMediaProvider extends android.content.ContentProvider
     public android.database.Cursor onQuerySearchSuggestions(java.lang.String p0, android.os.Bundle p1, android.os.CancellationSignal p2) { return null; }
     public android.database.Cursor onSearchMedia(java.lang.String p0, android.os.Bundle p1, android.os.CancellationSignal p2) { return null; }
     public android.database.Cursor onSearchMedia(java.lang.String p0, java.lang.String p1, android.os.Bundle p2, android.os.CancellationSignal p3) { return null; }
-    public android.os.ParcelFileDescriptor openFile(android.net.Uri p0, java.lang.String p1) { return null; }
-    public android.os.ParcelFileDescriptor openFile(android.net.Uri p0, java.lang.String p1, android.os.CancellationSignal p2) { return null; }
-    public android.content.res.AssetFileDescriptor openTypedAssetFile(android.net.Uri p0, java.lang.String p1, android.os.Bundle p2) { return null; }
     public android.content.res.AssetFileDescriptor openTypedAssetFile(android.net.Uri p0, java.lang.String p1, android.os.Bundle p2, android.os.CancellationSignal p3) { return null; }
-    public android.database.Cursor query(android.net.Uri p0, java.lang.String[] p1, android.os.Bundle p2, android.os.CancellationSignal p3) { return null; }
     public android.database.Cursor query(android.net.Uri p0, java.lang.String[] p1, java.lang.String p2, java.lang.String[] p3, java.lang.String p4) { return null; }
-    public android.database.Cursor query(android.net.Uri p0, java.lang.String[] p1, java.lang.String p2, java.lang.String[] p3, java.lang.String p4, android.os.CancellationSignal p5) { return null; }
     public int update(android.net.Uri p0, android.content.ContentValues p1, java.lang.String p2, java.lang.String[] p3) { return 0; }
     public static abstract class CloudMediaSurfaceController {
         private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();

@@ -4,7 +4,9 @@ package husk;
  *  Google's release key (its public certificate, which every app signed with that key carries). Apps check this before using
  *  Google's libraries ("This app won't run without Google Play services"); the services themselves are what Husk answers in place. */
 public final class GooglePackages {
-    public static final String GMS = "com.google.android.gms", VENDING = "com.android.vending", GSF = "com.google.android.gsf";
+    public static final String GMS = "com.google.android.gms", VENDING = "com.android.vending", GSF = "com.google.android.gsf",
+        /* the system WebView, at the version WebView.getCurrentWebViewPackage and the user agent give (Notion checks it is recent) */
+        WEBVIEW = "com.google.android.webview";
     /** Google's release certificate (SHA-1 38:91:8a:45:3d:07:19:93:54:f8:b1:9a:f0:5e:c6:56:2c:ed:57:88) */
     private static final String CERT = ""
         + "308204433082032ba003020102020900c2e08746644a308d300d06092a864886f70d01010405003074310b3009060355040613025553311330110603"
@@ -26,10 +28,10 @@ public final class GooglePackages {
         + "e62641aa99271dfd5228c5c587875ddb7f452758d661f6cc0cccb7352e424cc4365c523532f7325137593c4ae341f4db41edda0d0b1071a7c440f0fe"
         + "9ea01cb627ca674369d084bd2fd911ff06cdbf2cfa10dc0f893ae35762919048c7efc64c7144178342f70581c9de573af55b390dd7fdb9418631895d"
         + "5f759f30112687ff621410c069308a";
-    public static boolean is(String pkg) { return GMS.equals(pkg) || VENDING.equals(pkg) || GSF.equals(pkg); }
+    public static boolean is(String pkg) { return GMS.equals(pkg) || VENDING.equals(pkg) || GSF.equals(pkg) || WEBVIEW.equals(pkg); }
     public static android.content.pm.Signature signature() { return new android.content.pm.Signature(CERT); }
-    public static int versionCode(String pkg) { return VENDING.equals(pkg) ? 84651730 : 270000000; }
-    public static String versionName(String pkg) { return VENDING.equals(pkg) ? "46.5.17-31 [0] [PR] 750000000" : "27.00.00 (190400-750000000)"; }
+    public static int versionCode(String pkg) { return VENDING.equals(pkg) ? 84651730 : WEBVIEW.equals(pkg) ? 733920700 : 270000000; }
+    public static String versionName(String pkg) { return VENDING.equals(pkg) ? "46.5.17-31 [0] [PR] 750000000" : WEBVIEW.equals(pkg) ? "140.0.7339.207" : "27.00.00 (190400-750000000)"; }
     public static android.content.pm.ApplicationInfo applicationInfo(String pkg) {
         android.content.pm.ApplicationInfo a = new android.content.pm.ApplicationInfo();
         a.packageName = a.processName = pkg; a.enabled = true;

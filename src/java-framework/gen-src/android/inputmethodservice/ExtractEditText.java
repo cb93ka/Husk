@@ -15,13 +15,8 @@ public class ExtractEditText extends android.widget.EditText {
     public boolean hasWindowFocus() { return false; }
     public boolean isFocused() { return (huskProps.get("Focused") instanceof Boolean ? (Boolean) huskProps.get("Focused") : false); }
     public boolean isInExtractedMode() { return (huskProps.get("InExtractedMode") instanceof Boolean ? (Boolean) huskProps.get("InExtractedMode") : false); }
-    public boolean isInputMethodTarget() { return (huskProps.get("InputMethodTarget") instanceof Boolean ? (Boolean) huskProps.get("InputMethodTarget") : false); }
-    public void onSelectionChanged(int p0, int p1) {}
-    public boolean onTextContextMenuItem(int p0) { return false; }
-    public boolean performClick() { return false; }
     protected void replaceText_internal(int p0, int p1, java.lang.CharSequence p2) {}
     protected void setCursorPosition_internal(int p0, int p1) {}
-    public void setExtractedText(android.view.inputmethod.ExtractedText p0) { huskProps.put("ExtractedText", p0); }
     protected void setSpan_internal(java.lang.Object p0, int p1, int p2, int p3) {}
     public void startInternalChanges() {}
     protected void viewClicked(android.view.inputmethod.InputMethodManager p0) {}

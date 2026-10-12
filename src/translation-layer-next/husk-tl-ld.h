@@ -70,6 +70,7 @@ tl_lib *tl_ld_find_lib(const char *name);
 
 /* A symbol exported by `lib`, or (lib == NULL) by any loaded library, in load order. */
 void *tl_ld_sym(tl_lib *lib, const char *name);
+void *tl_ld_sym_deep(tl_lib *lib, const char *name, tl_lib **found_in);   /* the library, then its dependencies, as bionic's dlsym(handle) */
 
 /* The library an address belongs to (either view), and the nearest exported symbol. */
 tl_lib *tl_ld_lib_of(const void *addr);

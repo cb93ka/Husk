@@ -8,7 +8,6 @@ public abstract class CallScreeningService extends android.app.Service {
     public CallScreeningService() { super(); }
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
     public abstract void onScreenCall(android.telecom.Call.Details p0);
-    public boolean onUnbind(android.content.Intent p0) { return false; }
     public void respondToCall(android.telecom.Call.Details p0, android.telecom.CallScreeningService.CallResponse p1) {}
     public static abstract class CallResponse {
         protected CallResponse() {}

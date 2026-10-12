@@ -318,6 +318,7 @@
  "Husk will use StikDebug.": "Husk будет использовать StikDebug.",
  "Husk will use TrollStore.": "Husk будет использовать TrollStore.",
  "Husk's Android runtime is about 760 MB. Android itself follows once it is installed.": "Среда Android для Husk занимает около 760 МБ. Сам Android загрузится после её установки.",
+ "Husk's Estimate": "Оценка Husk",
  "Husk's JIT helper (%@) could not be found: %@ ": "Помощник JIT для Husk (%@) не найден: %@ ",
  "Husk's JIT helper did not start. Reinstall Husk, and ": "Помощник JIT для Husk не запустился. Переустановите Husk и ",
  "Husk's JIT helper finished without an answer.": "Помощник JIT для Husk завершился без ответа.",

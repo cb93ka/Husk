@@ -5,7 +5,6 @@ package android.inputmethodservice;
 public abstract class AbstractInputMethodService extends android.window.WindowProviderService implements android.view.KeyEvent.Callback {
     private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
     public AbstractInputMethodService() { super(); }
-    public void dump(java.io.FileDescriptor p0, java.io.PrintWriter p1, java.lang.String[] p2) {}
     public int getInitialDisplayId() { return (huskProps.get("InitialDisplayId") instanceof Integer ? (Integer) huskProps.get("InitialDisplayId") : 0); }
     public android.view.inputmethod.InputMethod getInputMethodInternal() { return (android.view.inputmethod.InputMethod) huskProps.get("InputMethodInternal"); }
     public android.view.KeyEvent.DispatcherState getKeyDispatcherState() { return (android.view.KeyEvent.DispatcherState) huskProps.get("KeyDispatcherState"); }

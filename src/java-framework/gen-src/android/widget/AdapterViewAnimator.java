@@ -19,7 +19,6 @@ public abstract class AdapterViewAnimator extends android.widget.AdapterView imp
     public android.animation.ObjectAnimator getInAnimation() { return (android.animation.ObjectAnimator) huskProps.get("InAnimation"); }
     public android.animation.ObjectAnimator getOutAnimation() { return (android.animation.ObjectAnimator) huskProps.get("OutAnimation"); }
     public android.view.View getSelectedView() { return (android.view.View) huskProps.get("SelectedView"); }
-    public void onLayout(boolean p0, int p1, int p2, int p3, int p4) {}
     public void onMeasure(int p0, int p1) {}
     public boolean onRemoteAdapterConnected() { return false; }
     public void onRemoteAdapterDisconnected() {}

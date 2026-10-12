@@ -8,20 +8,9 @@ public class MediaRouteButton extends android.view.View {
     public MediaRouteButton(android.content.Context p0, android.util.AttributeSet p1) { super(p0, p1); }
     public MediaRouteButton(android.content.Context p0, android.util.AttributeSet p1, int p2) { super(p0, p1, p2); }
     public MediaRouteButton(android.content.Context p0, android.util.AttributeSet p1, int p2, int p3) { super(p0, p1, p2, p3); }
-    public void drawableStateChanged() {}
     public int getRouteTypes() { return (huskProps.get("RouteTypes") instanceof Integer ? (Integer) huskProps.get("RouteTypes") : 0); }
-    public void jumpDrawablesToCurrentState() {}
-    public void onAttachedToWindow() {}
-    public int[] onCreateDrawableState(int p0) { return null; }
-    public void onDetachedFromWindow() {}
-    public void onDraw(android.graphics.Canvas p0) {}
-    public void onMeasure(int p0, int p1) {}
-    public boolean performClick() { return false; }
-    public void setContentDescription(java.lang.CharSequence p0) { huskProps.put("ContentDescription", p0); }
     public void setExtendedSettingsClickListener(android.view.View.OnClickListener p0) { huskProps.put("ExtendedSettingsClickListener", p0); }
     public void setRouteTypes(int p0) { huskProps.put("RouteTypes", Integer.valueOf(p0)); }
-    public void setVisibility(int p0) { huskProps.put("Visibility", Integer.valueOf(p0)); }
     public void showDialog() {}
-    public boolean verifyDrawable(android.graphics.drawable.Drawable p0) { return false; }
     MediaRouteButton() { this((android.content.Context) null); }
 }

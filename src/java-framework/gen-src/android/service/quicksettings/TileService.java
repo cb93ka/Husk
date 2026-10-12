@@ -26,7 +26,6 @@ public class TileService extends android.app.Service {
     public boolean isSecure() { return (huskProps.get("Secure") instanceof Boolean ? (Boolean) huskProps.get("Secure") : false); }
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
     public void onClick() {}
-    public void onDestroy() {}
     public void onStartListening() {}
     public void onStopListening() {}
     public void onTileAdded() {}

@@ -6,8 +6,6 @@ public abstract class TextToSpeechService extends android.app.Service {
     private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
     public TextToSpeechService() { super(); }
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
-    public void onCreate() {}
-    public void onDestroy() {}
     public java.lang.String onGetDefaultVoiceNameFor(java.lang.String p0, java.lang.String p1, java.lang.String p2) { return null; }
     protected java.util.Set onGetFeaturesForLanguage(java.lang.String p0, java.lang.String p1, java.lang.String p2) { return new java.util.HashSet(); }
     protected abstract java.lang.String[] onGetLanguage();

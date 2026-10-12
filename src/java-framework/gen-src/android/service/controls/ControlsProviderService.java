@@ -18,6 +18,5 @@ public abstract class ControlsProviderService extends android.app.Service {
     public ControlsProviderService() { super(); }
     public static void requestAddControl(android.content.Context p0, android.content.ComponentName p1, android.service.controls.Control p2) {}
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
-    public boolean onUnbind(android.content.Intent p0) { return false; }
     public abstract void performControlAction(java.lang.String p0, android.service.controls.actions.ControlAction p1, java.util.function.Consumer p2);
 }

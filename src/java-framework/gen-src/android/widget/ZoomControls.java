@@ -6,7 +6,6 @@ public class ZoomControls extends android.widget.LinearLayout {
     private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
     public ZoomControls(android.content.Context p0) { super(p0); }
     public ZoomControls(android.content.Context p0, android.util.AttributeSet p1) { super(p0, p1); }
-    public java.lang.CharSequence getAccessibilityClassName() { return (java.lang.CharSequence) huskProps.get("AccessibilityClassName"); }
     public boolean hasFocus() { return false; }
     public void hide() {}
     public boolean onTouchEvent(android.view.MotionEvent p0) { return false; }

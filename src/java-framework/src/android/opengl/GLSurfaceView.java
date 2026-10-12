@@ -60,8 +60,10 @@ public class GLSurfaceView extends android.view.SurfaceView implements android.v
                 EGLDisplay d = egl.eglGetDisplay(EGL10.EGL_DEFAULT_DISPLAY);
                 EGLConfig[] cfg = new EGLConfig[1];
                 egl.eglChooseConfig(d, null, cfg, 1, new int[1]);
-                contextFactory.createContext(egl, d, cfg[0]);
+                EGLContext probe = contextFactory.createContext(egl, d, cfg[0]);
                 version = Math.max(1, EGLContext.huskRequestedVersion());
+                // made off the render thread, that is a real context of its own: the render thread makes the one the app draws with
+                if (probe != null && probe != EGL10.EGL_NO_CONTEXT) try { contextFactory.destroyContext(egl, d, probe); } catch (RuntimeException e) { }
             } catch (RuntimeException e) {
                 android.util.Log.w("GLSurfaceView", "the app's EGLContextFactory threw: " + e);
                 version = 2;

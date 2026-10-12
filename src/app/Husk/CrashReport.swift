@@ -26,12 +26,14 @@ final class CrashReport: ObservableObject {
         case signal(Int)        // a fatal signal the crash handler recorded
         case startFailed        // the runtime said the game could not be started, and Husk closed after that
         case unknown            // no record of why: memory (iOS ends the app without a word), or Husk swiped away
+        case diagnosed(AppDiagnosis)    // the run's log says why (AppDiagnosis)
 
         var title: String {
             switch self {
             case .signal: return L("The game crashed")
             case .startFailed: return L("The game could not start")
             case .unknown: return L("Husk closed while the game was running")
+            case .diagnosed(let d): return d.title
             }
         }
         var detail: String {
@@ -45,6 +47,8 @@ final class CrashReport: ObservableObject {
                 return L("The runtime could not start it. The report says which part was missing.")
             case .unknown:
                 return L("Nothing was recorded, which usually means iOS ended Husk for using too much memory, or Husk was closed from the app switcher.")
+            case .diagnosed(let d):
+                return d.detail
             }
         }
     }
@@ -104,6 +108,7 @@ final class CrashReport: ObservableObject {
         } else if lines.contains(where: { $0.contains("the game could not be started") || $0.contains("native: launch refused") }) {
             cause = .startFailed
         }
+        if let d = AppDiagnosis.fromLog(lines.joined(separator: "\n")) { cause = .diagnosed(d) }
         let time = (info["time"] as? Double).map { Date(timeIntervalSince1970: $0) }
         pending = Report(game: info["label"] as? String ?? L("A game"), appID: info["id"] as? String ?? "",
                          cause: cause, when: time, excerpt: Array(Self.interesting(lines).suffix(14)))
@@ -112,6 +117,7 @@ final class CrashReport: ObservableObject {
         case .signal: GameStatusStore.shared.record(pending!.appID, .crashed)
         case .startFailed: GameStatusStore.shared.record(pending!.appID, .failed)
         case .unknown: break
+        case .diagnosed(let d): GameStatusStore.shared.record(pending!.appID, .crashed, diagnosis: d)
         }
     }
 
@@ -159,6 +165,14 @@ struct CrashReportSheet: View {
     let report: CrashReport.Report
     @Environment(\.dismiss) private var dismiss
     @State private var file: URL?
+    @State private var reporting: CompatSubject?
+
+    /// The game, for a report to the compatibility list.
+    private var subject: CompatSubject? {
+        guard let app = TranslationLayerStore.shared.apps.first(where: { $0.id == report.appID }), let pkg = app.packageName else { return nil }
+        return CompatSubject(package: pkg, name: app.label, isGame: LibraryItem.game(app).isGame, iconPath: app.iconPath,
+                             crash: "\(report.cause.title). \(report.cause.detail)")
+    }
 
     var body: some View {
         NavigationStack {
@@ -193,6 +207,13 @@ struct CrashReportSheet: View {
                         }
                         .buttonStyle(.borderedProminent)
                     }
+                    if let subject {
+                        Button { reporting = subject } label: {
+                            Label("Report to the Compatibility List", systemImage: "list.bullet.clipboard")
+                                .frame(maxWidth: .infinity).padding(.vertical, 6)
+                        }
+                        .buttonStyle(.bordered)
+                    }
                     Text(LocalizedStringKey(L("The report holds the full log of that run and which device and build it was on. Nothing is sent anywhere unless you share it.")))
                         .font(.footnote).foregroundStyle(.secondary)
                 }
@@ -203,5 +224,6 @@ struct CrashReportSheet: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(LocalizedStringKey(L("Done"))) { dismiss() } } }
         }
         .task { file = CrashReport.writeReport(report) }
+        .sheet(item: $reporting) { CompatReportSheet(subject: $0) }
     }
 }

@@ -10,6 +10,8 @@ final class HuskEGL implements EGL11 {
     static final class Config extends EGLConfig {}
     static final class Surface extends EGLSurface {
         long handle; int w, h; android.view.SurfaceView view;
+        android.graphics.SurfaceTexture texture;           /* a TextureView's: each swap reads the frame back into it */
+        java.nio.ByteBuffer pixels; android.graphics.Bitmap frame;
     }
     static final class Context extends EGLContext {
         long handle; int version;
@@ -48,7 +50,8 @@ final class HuskEGL implements EGL11 {
     public EGLContext eglCreateContext(EGLDisplay d, EGLConfig c, EGLContext share, int[] attribs) {
         int version = 1;
         if (attribs != null) for (int i = 0; i + 1 < attribs.length && attribs[i] != EGL_NONE; i += 2) if (attribs[i] == 0x3098) version = attribs[i + 1];
-        if (render()) { sRequestedVersion = version; return CONTEXT; }
+        sRequestedVersion = version;                 /* what GLSurfaceView asks the app's EGLContextFactory for, on any thread */
+        if (render()) return CONTEXT;
         long h = husk.EGLNative.createContext(version, share instanceof Context ? ((Context) share).handle : 0);
         if (h == 0) { err(EGL_BAD_ALLOC); return EGL_NO_CONTEXT; }
         Context ctx = new Context(); ctx.handle = h; ctx.version = version;
@@ -61,7 +64,22 @@ final class HuskEGL implements EGL11 {
         if (w instanceof android.view.Surface) return ((android.view.Surface) w).huskView;
         return null;
     }
+    private static android.graphics.SurfaceTexture textureOf(Object w) {
+        if (w instanceof android.graphics.SurfaceTexture) return (android.graphics.SurfaceTexture) w;
+        if (w instanceof android.view.Surface) return ((android.view.Surface) w).huskTexture;
+        return null;
+    }
     public EGLSurface eglCreateWindowSurface(EGLDisplay d, EGLConfig c, Object w, int[] attribs) {
+        android.graphics.SurfaceTexture tex = textureOf(w);
+        if (tex != null) {
+            int[] sz = tex.huskSize();
+            if ((sz[0] <= 0 || sz[1] <= 0) && tex.huskView != null) sz = new int[] { tex.huskView.getWidth(), tex.huskView.getHeight() };
+            if (sz[0] <= 0 || sz[1] <= 0) sz = new int[] { husk.Native.screenWidth(), husk.Native.screenHeight() };
+            long h = husk.EGLNative.createSurface(sz[0], sz[1]);
+            if (h == 0) { err(EGL_BAD_ALLOC); return EGL_NO_SURFACE; }
+            Surface s = new Surface(); s.handle = h; s.w = sz[0]; s.h = sz[1]; s.texture = tex;
+            return s;
+        }
         if (render()) return SURFACE;
         android.view.SurfaceView v = viewOf(w);
         int[] size = v != null ? v.huskSurfaceSize() : new int[] { husk.Native.screenWidth(), husk.Native.screenHeight() };
@@ -93,6 +111,7 @@ final class HuskEGL implements EGL11 {
         return ok;
     }
     public boolean eglSwapBuffers(EGLDisplay d, EGLSurface s) {
+        if (s instanceof Surface && ((Surface) s).texture != null && ((Surface) s).handle != 0) return readBack((Surface) s);
         if (render() || !(s instanceof Surface) || ((Surface) s).handle == 0) return true;
         Surface su = (Surface) s;
         Object[] cur = sCurrent.get();
@@ -119,4 +138,22 @@ final class HuskEGL implements EGL11 {
     public boolean eglWaitNative(int engine, Object bindTarget) { return true; }
     public boolean eglCopyBuffers(EGLDisplay d, EGLSurface s, Object target) { return true; }
     public EGLSurface eglCreatePixmapSurface(EGLDisplay d, EGLConfig c, Object pixmap, int[] attribs) { return EGL_NO_SURFACE; }
+    /* a TextureView's frame: read back while its context is current, flipped (GL rows run bottom-up), and posted to the texture */
+    private static boolean readBack(Surface su) {
+        int w = su.w, h = su.h;
+        if (su.pixels == null || su.pixels.capacity() != w * h * 4) su.pixels = java.nio.ByteBuffer.allocateDirect(w * h * 4).order(java.nio.ByteOrder.nativeOrder());
+        su.pixels.clear();
+        android.opengl.GLES20.glReadPixels(0, 0, w, h, android.opengl.GLES20.GL_RGBA, android.opengl.GLES20.GL_UNSIGNED_BYTE, su.pixels);
+        su.pixels.rewind();
+        if (su.frame == null || su.frame.getWidth() != w || su.frame.getHeight() != h) su.frame = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+        su.frame.copyPixelsFromBuffer(su.pixels);
+        android.graphics.Canvas c = su.texture.huskLock(null);
+        if (c == null) return true;
+        try {
+            c.save(); c.scale(1, -1, c.getWidth() / 2f, c.getHeight() / 2f);
+            c.drawBitmap(su.frame, null, new android.graphics.Rect(0, 0, c.getWidth(), c.getHeight()), null);
+            c.restore();
+        } finally { su.texture.huskPost(c); }
+        return true;
+    }
 }

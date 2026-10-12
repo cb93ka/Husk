@@ -32,49 +32,25 @@ public abstract class CookieManager {
     protected boolean allowFileSchemeCookiesImpl() { return sFileSchemeCookies; }
     protected void setAcceptFileSchemeCookiesImpl(boolean accept) { sFileSchemeCookies = accept; }
 
+    /** The app's WebKit data store's cookies (husk.Web), the ones its pages send and see. */
     static final class Husk extends CookieManager {
-        private final Map<String, LinkedHashMap<String, String>> mJar = new java.util.HashMap<>();
         private boolean mAccept = true;
-        private static String host(String url) {
-            try { String h = android.net.Uri.parse(url).getHost(); return h == null ? "" : h.toLowerCase(java.util.Locale.ROOT); } catch (RuntimeException e) { return ""; }
-        }
+        Husk() { husk.Web.ensureApp(); }
         public synchronized void setAcceptCookie(boolean accept) { mAccept = accept; }
         public synchronized boolean acceptCookie() { return mAccept; }
         public void setAcceptThirdPartyCookies(WebView w, boolean accept) {}
         public boolean acceptThirdPartyCookies(WebView w) { return false; }
         public void setCookie(String url, String value) { setCookie(url, value, null); }
         public void setCookie(String url, String value, ValueCallback<Boolean> cb) {
-            boolean ok = false;
-            synchronized (this) {
-                if (value != null) {
-                    String nv = value.split(";", 2)[0];
-                    int eq = nv.indexOf('=');
-                    String name = (eq < 0 ? "" : nv.substring(0, eq)).trim(), v = (eq < 0 ? nv : nv.substring(eq + 1)).trim();
-                    String h = host(url);
-                    for (String attr : value.split(";")) { String a = attr.trim(); if (a.regionMatches(true, 0, "domain=", 0, 7)) h = a.substring(7).replaceFirst("^\\.", "").toLowerCase(java.util.Locale.ROOT); }
-                    mJar.computeIfAbsent(h, k -> new LinkedHashMap<>()).put(name, v);
-                    ok = true;
-                }
-            }
+            boolean ok = url != null && value != null && husk.Web.cookieSet(url, value);
             if (cb != null) cb.onReceiveValue(ok);
         }
-        public synchronized String getCookie(String url) {
-            String h = host(url);
-            StringBuilder sb = new StringBuilder();
-            for (Map.Entry<String, LinkedHashMap<String, String>> e : mJar.entrySet()) {
-                if (!h.equals(e.getKey()) && !h.endsWith("." + e.getKey())) continue;
-                for (Map.Entry<String, String> c : e.getValue().entrySet()) {
-                    if (sb.length() > 0) sb.append("; ");
-                    sb.append(c.getKey().isEmpty() ? c.getValue() : c.getKey() + "=" + c.getValue());
-                }
-            }
-            return sb.length() == 0 ? null : sb.toString();
-        }
-        public synchronized void removeSessionCookie() {}
-        public void removeSessionCookies(ValueCallback<Boolean> cb) { if (cb != null) cb.onReceiveValue(false); }
-        public synchronized void removeAllCookie() { mJar.clear(); }
-        public void removeAllCookies(ValueCallback<Boolean> cb) { boolean had; synchronized (this) { had = !mJar.isEmpty(); mJar.clear(); } if (cb != null) cb.onReceiveValue(had); }
-        public synchronized boolean hasCookies() { return !mJar.isEmpty(); }
+        public String getCookie(String url) { return url == null ? null : husk.Web.cookieGet(url); }
+        public void removeSessionCookie() { husk.Web.cookieClear(true); }
+        public void removeSessionCookies(ValueCallback<Boolean> cb) { boolean had = husk.Web.cookieClear(true); if (cb != null) cb.onReceiveValue(had); }
+        public void removeAllCookie() { husk.Web.cookieClear(false); }
+        public void removeAllCookies(ValueCallback<Boolean> cb) { boolean had = husk.Web.cookieClear(false); if (cb != null) cb.onReceiveValue(had); }
+        public boolean hasCookies() { return husk.Web.cookieAny(); }
         public void removeExpiredCookie() {}
         public void flush() {}
     }

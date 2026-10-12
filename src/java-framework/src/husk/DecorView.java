@@ -19,7 +19,7 @@ public final class DecorView extends FrameLayout {
     private Drawable mBackground;
     private LinearLayout mStack;
     private FrameLayout mContent;
-    private TextView mTitle;
+    private android.widget.Toolbar mTitle;
     private View mActionBar;
     private boolean mCloseOnTouchOutside;
     private int mInsetTop, mInsetBottom, mInsetLeft, mInsetRight;
@@ -45,6 +45,8 @@ public final class DecorView extends FrameLayout {
         };
         return sFallback;
     }
+    /** The window's controller, before the decor is attached too (Android's PendingInsetsController). */
+    @Override public WindowInsetsController getWindowInsetsController() { WindowInsetsController c = super.getWindowInsetsController(); return c != null ? c : fallbackInsetsController(); }
     public void setCloseOnTouchOutside(boolean c) { mCloseOnTouchOutside = c; }
     public boolean closeOnTouchOutside() { return mCloseOnTouchOutside; }
     /** The window background; its padding (a Material dialog's InsetDrawable: the card inset from the window's edges) keeps the
@@ -68,14 +70,11 @@ public final class DecorView extends FrameLayout {
             TypedValue v = new TypedValue();
             int h = c.getTheme().resolveAttribute(android.R.attr.actionBarSize, v, true) ? TypedValue.complexToDimensionPixelSize(v.data, getResources().getDisplayMetrics()) : (int) (56 * Native.density());
             int bg = c.getTheme().resolveAttribute(android.R.attr.colorPrimary, v, true) && v.type >= TypedValue.TYPE_FIRST_INT ? v.data : 0xFF212121;
-            mTitle = new TextView(c);
-            mTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-            mTitle.setTextColor(Color.luminance(bg) > 0.5f ? 0xDE000000 : 0xFFFFFFFF);
-            mTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-            mTitle.setGravity(Gravity.CENTER_VERTICAL);
-            mTitle.setSingleLine(true);
-            mTitle.setPadding((int) (16 * Native.density()), 0, (int) (16 * Native.density()), 0);
-            mTitle.setText(title != null ? title : "");
+            /* a Toolbar with the platform's id, as the Material action bar is (apps find it by android:id/action_bar) */
+            mTitle = new android.widget.Toolbar(c);
+            mTitle.setId(0x010201df);
+            mTitle.setTitleTextColor(Color.luminance(bg) > 0.5f ? 0xDE000000 : 0xFFFFFFFF);
+            mTitle.setTitle(title != null ? title : "");
             mTitle.setBackgroundColor(bg);
             mActionBar = mTitle;
             mStack.addView(mTitle, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, h));
@@ -86,8 +85,16 @@ public final class DecorView extends FrameLayout {
         addView(mStack, new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         return mContent;
     }
-    public void setTitle(CharSequence t) { if (mTitle != null) mTitle.setText(t); }
+    public void setTitle(CharSequence t) { if (mTitle != null) mTitle.setTitle(t); }
     public View actionBarView() { return mActionBar; }
+    private View mTabStrip;
+    /** The action bar's navigation tabs, in a row under it (null takes the row away). */
+    public void setTabStrip(View strip) {
+        if (mStack == null || strip == mTabStrip) return;
+        if (mTabStrip != null) mStack.removeView(mTabStrip);
+        mTabStrip = strip;
+        if (strip != null) mStack.addView(strip, mActionBar != null ? mStack.indexOfChild(mActionBar) + 1 : 0, new LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, (int) (48 * Native.density())));
+    }
     public void showActionBar(boolean show) { if (mActionBar != null) mActionBar.setVisibility(show ? VISIBLE : GONE); }
 
     /** A floating window (a dialog) is at least the theme's minimum width: a fraction of the screen's, or a size. */

@@ -17,6 +17,8 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <execinfo.h>
+#include <TargetConditionals.h>
 #include <stdbool.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -44,6 +46,8 @@
 #include <mach/thread_policy.h>
 #include <time.h>
 #include <search.h>
+#include <dlfcn.h>
+#include <libkern/OSCacheControl.h>
 #include <unistd.h>
 #include <utime.h>
 
@@ -79,7 +83,9 @@ void tl_set_data_dir(const char *dir)
 const char *tl_data_dir(void) { return g_data_dir[0] ? g_data_dir : "/tmp"; }
 
 /* A file holding `content`, already unlinked. Where it can be made depends on the host: iOS gives an app no /tmp. */
-static int synth_file(const char *content)
+static int synth_file_n(const void *content, size_t n);
+static int synth_file(const char *content) { return synth_file_n(content, strlen(content)); }
+static int synth_file_n(const void *content, size_t n)
 {
     const char *dirs[3] = { g_data_dir[0] ? g_data_dir : NULL, getenv("TMPDIR"), "/tmp" };
     char tmpl[1100];
@@ -91,7 +97,6 @@ static int synth_file(const char *content)
     }
     if (fd < 0) { tl_log_line("bionic: no writable directory for a synthetic file (%s)", strerror(errno)); return -1; }
     unlink(tmpl);
-    size_t n = strlen(content);
     if (write(fd, content, n) != (ssize_t)n) { close(fd); return -1; }
     lseek(fd, 0, SEEK_SET);
     return fd;
@@ -156,6 +161,12 @@ static const char *synth_content(const char *path, char *buf, size_t n)
         snprintf(buf, n, "0-%ld\n", (getenv("TL_NCPU") ? atol(getenv("TL_NCPU")) : sysconf(_SC_NPROCESSORS_ONLN)) - 1);
         return buf;
     }
+    if (!strcmp(path, "/proc/self/maps") || (!strncmp(path, "/proc/", 6) && strstr(path, "/maps") && !strcmp(strstr(path, "/maps"), "/maps"))) {
+        size_t tl_ld_maps(char *buf, size_t n, const char *libdir);
+        char dir[1024]; snprintf(dir, sizeof(dir), "%s/lib", tl_data_dir());
+        tl_ld_maps(buf, n, dir);
+        return buf;
+    }
     if (!strcmp(path, "/proc/self/status")) {
         snprintf(buf, n, "Name:\tapp_process64\nState:\tR (running)\nTgid:\t%d\nPid:\t%d\nPPid:\t1\nUid:\t10001\t10001\t10001\t10001\nThreads:\t8\nVmRSS:\t  300000 kB\n", getpid(), getpid());
         return buf;
@@ -166,7 +177,15 @@ static const char *synth_content(const char *path, char *buf, size_t n)
 /* A file for a path whose contents are made up (/proc/cpuinfo ...), or -1 when the path is real. */
 int tl_synth_open(const char *path)
 {
-    char content[32768];
+    /* the auxiliary vector, as the kernel gives it (Go's runtime in a library reads its page size here): the values getauxval answers */
+    if (!strcmp(path, "/proc/self/auxv") || (!strncmp(path, "/proc/", 6) && strstr(path, "/auxv") && !strcmp(strstr(path, "/auxv"), "/auxv"))) {
+        unsigned long tl_bionic_getauxval(unsigned long type);
+        static uint8_t random16[16]; static int made; if (!made) { arc4random_buf(random16, 16); made = 1; }
+        uint64_t v[] = { 6, 16384, 16, tl_bionic_getauxval(16), 26, tl_bionic_getauxval(26), 17, 100, 25, (uint64_t)(uintptr_t)random16,
+                         23, 0, 51, 4096, 0, 0 };
+        return synth_file_n(v, sizeof(v));
+    }
+    static __thread char content[65536];
     const char *s = synth_content(path, content, sizeof(content));
     return s ? synth_file(s) : -1;
 }
@@ -197,6 +216,62 @@ const char *tl_path_resolve(const char *path, char *buf, size_t n)
             size_t l = strlen(roots[i]);
             if (!strncmp(path, roots[i], l) && (path[l] == 0 || path[l] == '/')) { snprintf(buf, n, "%s%s", g_cacerts, path + l); return buf; }
         }
+    }
+    /* /system/lib64/libdl.so and the like: the libraries Husk provides itself are files there, as on a phone, so loaders that look
+     * for a dependency on disk before loading it (Facebook's SoLoader, in React Native apps) find them. Each is a small ELF stub;
+     * loading it by that path loads Husk's own. */
+    {
+        static const char *const libdirs[] = { "/system/lib64/", "/System/lib64/", "/vendor/lib64/", "/system/lib/" };
+        for (int i = 0; i < 4; i++) {
+            size_t l = strlen(libdirs[i]);
+            bool tl_bionic_is_system_lib(const char *soname);
+            if (!strncmp(path, libdirs[i], l) && !strchr(path + l, '/') && tl_bionic_is_system_lib(path + l)) {
+                snprintf(buf, n, "%s/.husk-system-lib2.so", tl_data_dir());
+                struct stat st;
+                if (stat(buf, &st) != 0) {
+                    /* a minimal arm64 shared object: a header, a load segment and a dynamic section (SONAME only), which ELF
+                     * readers such as SoLoader's MinElf parse to list a library's dependencies (none) */
+                    uint8_t elf[0x110]; memset(elf, 0, sizeof(elf));
+                    #define W16(o, v) do { elf[o] = (uint8_t)(v); elf[(o) + 1] = (uint8_t)((v) >> 8); } while (0)
+                    #define W32(o, v) do { W16(o, (v) & 0xffff); W16((o) + 2, ((uint32_t)(v)) >> 16); } while (0)
+                    #define W64(o, v) do { W32(o, (uint32_t)(v)); W32((o) + 4, (uint32_t)((uint64_t)(v) >> 32)); } while (0)
+                    static const uint8_t ident[16] = { 0x7f, 'E', 'L', 'F', 2, 1, 1, 0 };
+                    memcpy(elf, ident, 16);
+                    W16(16, 3); W16(18, 0xb7); W32(20, 1); W64(32, 64); W16(52, 64); W16(54, 56); W16(56, 2); W16(58, 64);
+                    W32(64, 1); W32(68, 4); W64(72, 0); W64(80, 0); W64(88, 0); W64(96, sizeof(elf)); W64(104, sizeof(elf)); W64(112, 0x1000);
+                    W32(120, 2); W32(124, 6); W64(128, 0xb0); W64(136, 0xb0); W64(144, 0xb0); W64(152, 64); W64(160, 64); W64(168, 8);
+                    W64(0xb0, 5); W64(0xb8, 0xf0);                  /* DT_STRTAB */
+                    W64(0xc0, 10); W64(0xc8, 0x20);                 /* DT_STRSZ */
+                    W64(0xd0, 14); W64(0xd8, 1);                    /* DT_SONAME */
+                    memcpy(elf + 0xf1, "libhusk-system.so", 17);
+                    #undef W64
+                    #undef W32
+                    #undef W16
+                    FILE *f = fopen(buf, "wb");
+                    if (f) { fwrite(elf, 1, sizeof(elf), f); fclose(f); }
+                }
+                return buf;
+            }
+        }
+    }
+    /* /data/user/0/<package> and /data/data/<package>: the app's own folder, as Android names it -- short, where the real one on a
+       phone is ~150 characters (p4a's launcher allows its script path 128) */
+    {
+        static const char *const roots[] = { "/data/user/0/", "/data/data/" };
+        for (int i = 0; i < 2; i++) {
+            size_t l = strlen(roots[i]);
+            if (strncmp(path, roots[i], l) || !path[l] || path[l] == '/') continue;
+            const char *rest = strchr(path + l, '/');
+            snprintf(buf, n, "%s%s", tl_data_dir(), rest ? rest : "");
+            return buf;
+        }
+    }
+    /* /data/local/tmp: the world-writable scratch folder (JNA unpacks itself there): a folder of the app's own */
+    if (!strncmp(path, "/data/local/tmp", 15) && (path[15] == 0 || path[15] == '/')) {
+        snprintf(buf, n, "%s/cache/local-tmp", tl_data_dir());
+        mkdir(buf, 0777);
+        snprintf(buf, n, "%s/cache/local-tmp%s", tl_data_dir(), path + 15);
+        return buf;
     }
     const char *pkg = "/data/data/";
     if (!strncmp(path, pkg, strlen(pkg))) {
@@ -280,8 +355,31 @@ static pthread_mutex_t g_jar_lock = PTHREAD_MUTEX_INITIALIZER;
 static tl_zip g_jar_zip;
 static char g_jar_apk[1024];
 
+static bool jar_lookup(const char *p, jar_entry *out);
+/* The native library folder holds an empty stand-in for each library the APKs carry (so File.exists() and findLibrary() find
+ * them); opened or looked at, one is the APK's entry -- Unity copies its symbol file (libil2cpp.usym.so) out of there. */
+static bool lib_standin(const char *p, jar_entry *out)
+{
+    const char *dd = tl_data_dir();
+    /* iOS names the app's container both /var/mobile/... and /private/var/mobile/... (realpath, Qt's plugin scan): either is it */
+    if (dd && !strncmp(p, "/private/var/", 13) && !strncmp(dd, "/var/", 5)) p += 8;
+    else if (dd && !strncmp(p, "/var/", 5) && !strncmp(dd, "/private/var/", 13)) dd += 8;
+    size_t dl = dd ? strlen(dd) : 0;
+    if (!dl || strncmp(p, dd, dl) || strncmp(p + dl, "/lib/", 5) || strchr(p + dl + 5, '/')) return false;
+    const char *name = p + dl + 5;
+    size_t nl = strlen(name);
+    if (nl < 4 || strcmp(name + nl - 3, ".so")) return false;
+    struct stat st;
+    if (stat(p, &st) != 0 || st.st_size != 0) return false;
+    const char *tl_ld_lib_apk(const char *name);
+    const char *apk = tl_ld_lib_apk(name);
+    if (!apk) return false;
+    char jar[1400]; snprintf(jar, sizeof(jar), "jar:file://%s!/lib/arm64-v8a/%s", apk, name);
+    return jar_lookup(jar, out) && out->found;
+}
 static bool jar_lookup(const char *p, jar_entry *out)
 {
+    if (p && p[0] == '/' && lib_standin(p, out)) return true;
     memset(out, 0, sizeof(*out));
     const char *q = p ? strstr(p, "jar:file:") : NULL;
     if (!q) return false;
@@ -439,9 +537,18 @@ void tl_atomic_closed(int fd)
     free(real);
 }
 
+/* A game's expansion file (Android/obb/<package>/main.<version>.<package>.obb) that is not there: said once, for the app's
+ * diagnosis ("Missing game data") -- the store installs APKs and splits, not expansion files. */
+void tl_note_missing_file(const char *path)
+{
+    static bool said;
+    if (said || !path) return;
+    const char *dot = strrchr(path, '.');
+    if (strstr(path, "/obb/") && dot && !strcmp(dot, ".obb")) { said = true; tl_log_line("husk: the app's expansion file (OBB) is missing: %s", path); }
+}
 static int b_open(const char *path, int flags, unsigned mode)
 {
-    char buf[1024], content[32768];
+    char buf[1024]; static __thread char content[32768];
     jar_entry jar;
     if (jar_lookup(path, &jar)) {
         if (!jar.found || jar.dir || (flags & 3) != 0) { tl_set_guest_errno(jar.dir ? 21 : 2); ftrace_open_jar(path, -1); return -1; }
@@ -458,6 +565,7 @@ static int b_open(const char *path, int flags, unsigned mode)
         return fd;
     }
     const char *real = tl_path_resolve(path, buf, sizeof(buf));
+    if (strstr(path, "/auxv")) { int afd = tl_synth_open(path); if (afd >= 0) return afd; }   /* binary, not text */
     const char *s = synth_content(path, content, sizeof(content));
     if (s) {
         int fd = synth_file(s);
@@ -480,6 +588,7 @@ static int b_open(const char *path, int flags, unsigned mode)
     int e = errno;
     TL_ERRNO_END();
     { static int tr = -1; if (tr < 0) tr = getenv("TL_FILE_TRACE") ? atoi(getenv("TL_FILE_TRACE")) : 0; if (tr) tl_log_line("file: open(%s, %#x) -> %d%s", path, flags, fd, fd < 0 ? (e == ENOENT ? " ENOENT" : " error") : ""); }
+    if (fd < 0 && e == ENOENT) tl_note_missing_file(path);
     return fd;
 }
 static int b___open_2(const char *path, int flags) { return b_open(path, flags, 0); }
@@ -550,6 +659,12 @@ static long b_write(int fd, const void *p, size_t n)
     if (net_trace_fd(fd)) tl_log_line("net: write(fd %d, %zu) -> %ld errno %d", fd, n, r, r < 0 ? e : 0);
     return r;
 }
+/* eventfd's helpers, over the pipe an eventfd is here */
+/* mount tables (libopenjdk's FileStore): there are none to list */
+static void *b_setmntent(const char *path, const char *mode) { (void)path; (void)mode; tl_set_guest_errno(2); return NULL; }
+static void *b_getmntent(void *f) { (void)f; return NULL; }
+static void *b_getmntent_r(void *f, void *ent, char *buf, int n) { (void)f; (void)ent; (void)buf; (void)n; return NULL; }
+static int b_endmntent(void *f) { (void)f; return 1; }
 /* write() with the buffer's size checked first, as bionic's FORTIFY does */
 static long b___write_chk(int fd, const void *p, size_t n, size_t bufsize) { if (n > bufsize) abort(); return b_write(fd, p, n); }
 static long b_writev(int fd, const struct iovec *v, int n) { TL_ERRNO_BEGIN(); long r = writev(fd, v, n); TL_ERRNO_END(); return r; }
@@ -588,7 +703,9 @@ static long b_lseek(int fd, long off, int whence)
     TL_ERRNO_BEGIN(); long r = lseek(fd, off, whence); TL_ERRNO_END(); return r;
 }
 static int b_dup(int fd) { TL_ERRNO_BEGIN(); int r = dup(fd); TL_ERRNO_END(); return r; }
-static int b_dup2(int a, int b) { TL_ERRNO_BEGIN(); int r = dup2(a, b); if (r >= 0 && a != b) tl_atomic_closed(b); TL_ERRNO_END(); return r; }
+/* The host's stdin/stdout/stderr stay the host's: apps that send stdout/stderr to logcat dup2 a pipe over them (Waze), which
+ * would swallow Husk's own log. The redirect is reported done; their pipe simply stays empty. */
+static int b_dup2(int a, int b) { if (b >= 0 && b <= 2 && a != b) return b; TL_ERRNO_BEGIN(); int r = dup2(a, b); if (r >= 0 && a != b) tl_atomic_closed(b); TL_ERRNO_END(); return r; }
 static int b_pipe(int fds[2]) { TL_ERRNO_BEGIN(); int r = pipe(fds); TL_ERRNO_END(); return r; }
 static int b_fsync(int fd) { TL_ERRNO_BEGIN(); int r = fsync(fd); TL_ERRNO_END(); return r; }
 static int b_ftruncate(int fd, long n) { TL_ERRNO_BEGIN(); int r = ftruncate(fd, n); TL_ERRNO_END(); return r; }
@@ -601,6 +718,20 @@ static int b_flock(int fd, int op) { TL_ERRNO_BEGIN(); int r = flock(fd, op); TL
 PATH1(int, unlink, unlink)
 PATH1(int, rmdir, rmdir)
 static int b_mkdir(const char *p, unsigned mode) { char b[1024]; TL_ERRNO_BEGIN(); int r = mkdir(tl_path_resolve(p, b, sizeof(b)), (mode_t)mode); TL_ERRNO_END(); return r; }
+/* FIFOs (Realm signals between its threads through one in its .realm.temp folder); other device nodes are refused, as for an app */
+static int b_mkfifo(const char *p, unsigned mode) { char b[1024]; TL_ERRNO_BEGIN(); int r = mkfifo(tl_path_resolve(p, b, sizeof(b)), (mode_t)(mode & 0777)); TL_ERRNO_END(); return r; }
+static int b_mknod(const char *p, unsigned mode, unsigned long dev)
+{
+    (void)dev;
+    if ((mode & 0170000) == 0010000) return b_mkfifo(p, mode);
+    tl_set_guest_errno(1 /* EPERM */); return -1;
+}
+static int b_mknodat(int dirfd, const char *p, unsigned mode, unsigned long dev)
+{
+    if (dirfd != -100 /* AT_FDCWD */ && p && p[0] != '/') { tl_set_guest_errno(95 /* EOPNOTSUPP */); return -1; }
+    return b_mknod(p, mode, dev);
+}
+static int b_mkfifoat(int dirfd, const char *p, unsigned mode) { return b_mknodat(dirfd, p, (mode & 0777) | 0010000, 0); }
 /* TL_FILE_TRACE also says what is asked of the file system without opening anything: which paths a game probes for, and whether they are there. */
 static void ftrace(const char *what, const char *path, int r, int e)
 {
@@ -628,6 +759,7 @@ static long b_readlink(const char *p, char *buf, size_t n)
 }
 static char *b_realpath(const char *p, char *out) { char b[1024]; TL_ERRNO_BEGIN(); char *r = realpath(tl_path_resolve(p, b, sizeof(b)), out); TL_ERRNO_END(); return r; }
 static char *b_getcwd(char *buf, size_t n) { TL_ERRNO_BEGIN(); char *r = getcwd(buf, n); TL_ERRNO_END(); return r; }
+static char *b___getcwd_chk(char *buf, size_t n, size_t bl) { (void)bl; return b_getcwd(buf, n); }
 static int b_utimes(const char *p, const struct timeval tv[2]) { char b[1024]; TL_ERRNO_BEGIN(); int r = utimes(tl_path_resolve(p, b, sizeof(b)), tv); TL_ERRNO_END(); return r; }
 static int b_utime(const char *p, const struct utimbuf *t) { char b[1024]; TL_ERRNO_BEGIN(); int r = utime(tl_path_resolve(p, b, sizeof(b)), t); TL_ERRNO_END(); return r; }
 static int b_futimens(int fd, const struct timespec ts[2]) { TL_ERRNO_BEGIN(); int r = futimens(fd, ts); TL_ERRNO_END(); return r; }
@@ -691,6 +823,7 @@ static int b_stat(const char *p, guest_stat *g)
     }
     TL_ERRNO_BEGIN(); int r = stat(tl_path_resolve(p, b, sizeof(b)), &s); int e = errno; TL_ERRNO_END();
     ftrace("stat", p, r, e);
+    if (r != 0 && e == ENOENT) tl_note_missing_file(p);
     if (r == 0) fill_stat(g, &s);
     return r;
 }
@@ -739,6 +872,18 @@ static int b_statfs(const char *p, guest_statfs *g)
     return r;
 }
 
+static int b_fstatfs(int fd, guest_statfs *g)
+{
+    struct statfs s;
+    TL_ERRNO_BEGIN(); int r = fstatfs(fd, &s); TL_ERRNO_END();
+    if (r == 0) {
+        memset(g, 0, sizeof(*g));
+        g->f_type = 0xEF53; g->f_bsize = s.f_bsize; g->f_blocks = s.f_blocks; g->f_bfree = s.f_bfree;
+        g->f_bavail = s.f_bavail; g->f_files = s.f_files; g->f_ffree = s.f_ffree; g->f_namelen = 255; g->f_frsize = s.f_bsize;
+    }
+    return r;
+}
+
 /* fcntl / ioctl */
 typedef struct { int16_t l_type, l_whence; int pad; int64_t l_start, l_len; int32_t l_pid; } guest_flock;
 
@@ -778,10 +923,38 @@ static int b_ioctl(int fd, unsigned long req, long arg)
 /* ------------------------------------------------------------ directories */
 
 typedef struct { uint64_t d_ino; int64_t d_off; uint16_t d_reclen; uint8_t d_type; char d_name[256]; } guest_dirent;
-typedef struct { DIR *dir; guest_dirent ent; } guest_dir;
+typedef struct { DIR *dir; guest_dirent ent; char **names; uint8_t *types; size_t n, pos; } guest_dir;
+
+/* A folder inside an APK ("jar:file:///.../base.apk!/assets"), listed from the zip: what is directly in it, files and folders.
+ * Unity 6 lists its StreamingAssets this way through System.IO (Wordscapes boots from it). */
+static guest_dir *jar_opendir(const char *p)
+{
+    jar_entry j;
+    if (!jar_lookup(p, &j) || !j.found || !j.dir) return NULL;
+    guest_dir *g = calloc(1, sizeof(*g));
+    size_t cap = 0, len = strlen(j.entry);
+    pthread_mutex_lock(&g_jar_lock);
+    for (size_t i = 0; i < g_jar_zip.count; i++) {
+        const char *name = g_jar_zip.entries[i].name;
+        if (strncmp(name, j.entry, len) || name[len] != '/' || !name[len + 1]) continue;
+        const char *rest = name + len + 1, *slash = strchr(rest, '/');
+        size_t nl = slash ? (size_t)(slash - rest) : strlen(rest);
+        if (!nl) continue;
+        bool seen = false;
+        for (size_t k = 0; k < g->n && !seen; k++) seen = strlen(g->names[k]) == nl && !strncmp(g->names[k], rest, nl);
+        if (seen) continue;
+        if (g->n == cap) { cap = cap ? cap * 2 : 32; g->names = realloc(g->names, cap * sizeof(char *)); g->types = realloc(g->types, cap); }
+        g->names[g->n] = strndup(rest, nl);
+        g->types[g->n] = slash ? DT_DIR : DT_REG;
+        g->n++;
+    }
+    pthread_mutex_unlock(&g_jar_lock);
+    return g;
+}
 
 static void *b_opendir(const char *p)
 {
+    if (p && strstr(p, "jar:file:")) { guest_dir *jd = jar_opendir(p); ftrace("opendir", p, jd ? 0 : -1, jd ? 0 : ENOENT); if (!jd) tl_set_guest_errno(2); return jd; }
     char b[1024];
     TL_ERRNO_BEGIN(); DIR *d = opendir(tl_path_resolve(p, b, sizeof(b))); int e = errno; TL_ERRNO_END();
     ftrace("opendir", p, d ? 0 : -1, e);
@@ -799,18 +972,25 @@ static void *b_fdopendir(int fd)
     g->dir = d;
     return g;
 }
-static int b_dirfd(void *dp) { return dirfd(((guest_dir *)dp)->dir); }
-static void b_rewinddir(void *dp) { rewinddir(((guest_dir *)dp)->dir); }
+static int b_dirfd(void *dp) { guest_dir *g = dp; if (!g->dir) { tl_set_guest_errno(95); return -1; } return dirfd(g->dir); }
+static void b_rewinddir(void *dp) { guest_dir *g = dp; if (g->dir) rewinddir(g->dir); else g->pos = 0; }
 static void *b_readdir(void *dp)
 {
     guest_dir *g = dp;
+    if (!g->dir) {
+        if (g->pos >= g->n) return NULL;
+        g->ent.d_ino = g->pos + 1; g->ent.d_off = (int64_t)g->pos + 1; g->ent.d_reclen = sizeof(guest_dirent); g->ent.d_type = g->types[g->pos];
+        snprintf(g->ent.d_name, sizeof(g->ent.d_name), "%s", g->names[g->pos]);
+        g->pos++;
+        return &g->ent;
+    }
     TL_ERRNO_BEGIN(); struct dirent *e = readdir(g->dir); TL_ERRNO_END();
     if (!e) return NULL;
     g->ent.d_ino = e->d_ino; g->ent.d_off = 0; g->ent.d_reclen = sizeof(guest_dirent); g->ent.d_type = e->d_type;
     snprintf(g->ent.d_name, sizeof(g->ent.d_name), "%s", e->d_name);
     return &g->ent;
 }
-static int b_closedir(void *dp) { guest_dir *g = dp; int r = closedir(g->dir); free(g); return r; }
+static int b_closedir(void *dp) { guest_dir *g = dp; int r = g->dir ? closedir(g->dir) : 0; for (size_t i = 0; i < g->n; i++) free(g->names[i]); free(g->names); free(g->types); free(g); return r; }
 
 /* scandir: the entries of a directory, optionally filtered and sorted by functions of the guest's own (the same ISA, so they are called directly). */
 static int b_alphasort(const guest_dirent **a, const guest_dirent **b) { return strcoll((*a)->d_name, (*b)->d_name); }
@@ -894,11 +1074,21 @@ static void anon_zap(uintptr_t addr, size_t len)
     pthread_mutex_unlock(&g_anon_lock);
 }
 
+const char *tl_ld_symbol_at(const void *addr, const char **lib_name, const void **sym_addr);
 static int g_mm_trace = -1;
 static void mm_trace(const char *what, void *a, size_t l, long x, long y)
 {
     if (g_mm_trace < 0) g_mm_trace = getenv("TL_MM_TRACE") ? 1 : 0;
-    if (g_mm_trace) tl_log_line("mm: %s addr=%p len=%#zx %#lx %#lx", what, a, l, x, y);
+    if (!g_mm_trace) return;
+    /* a big one says who asked (the guest's code that called mmap, mprotect or madvise) */
+    if (l >= (64u << 20)) {
+        void *ra[8]; int n = backtrace(ra, 8);
+        const char *who = "?", *lib = NULL; const void *sa = NULL;
+        for (int i = 1; i < n; i++) { const char *sym = tl_ld_symbol_at(ra[i], &lib, &sa); if (lib) { who = sym ? sym : "?"; break; } }
+        tl_log_line("mm: %s addr=%p len=%#zx %#lx %#lx  <- %s %s", what, a, l, x, y, lib ? lib : "?", who);
+        return;
+    }
+    tl_log_line("mm: %s addr=%p len=%#zx %#lx %#lx", what, a, l, x, y);
 }
 
 /*
@@ -957,6 +1147,17 @@ static size_t phantom_clamp(uintptr_t a, size_t l)
     return l;
 }
 
+/* Whether only the JIT region can execute here: the phone (iOS), or a Mac told to behave like one (TL_PHONE_JIT=1). */
+static bool phone_jit(void)
+{
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    return true;
+#else
+    static int on = -1;
+    if (on < 0) on = getenv("TL_PHONE_JIT") ? 1 : 0;
+    return on;
+#endif
+}
 static void *b_mmap(void *addr, size_t len, int prot, int flags, int fd, long off)
 {
     /* A hooking library's trampolines (Geode): executable memory is a piece of the JIT region, written through the other view. */
@@ -966,6 +1167,21 @@ static void *b_mmap(void *addr, size_t len, int prot, int flags, int fd, long of
         if (tl_xmem_alloc(n, &rx, &rw)) {
             memset(rw, 0, n);
             tl_log_line("mm: %#zx bytes of executable memory for the guest at %p", n, (void *)rx);
+            return rx;
+        }
+    }
+    /* A JIT's code memory where only the JIT region can execute (a phone: iOS 26+ lets nothing else run): LuaJIT maps it near its
+     * own code with a hint, writes the machine code, then makes it executable with mprotect -- which on a phone "succeeds" and
+     * then faults. An anonymous, code-sized, writable mapping hinted near the region comes from the region instead: its stores
+     * go through the writable view (code-write emulation), and mprotect there is a yes. TL_PHONE_JIT=1 does this on a Mac too. */
+    if (addr && !(prot & PROT_EXEC) && (prot & PROT_WRITE) && (flags & 0x20) && !(flags & 0x10) && len <= (32u << 20)
+        && tl_codewrite_enabled() && phone_jit() && tl_xmem_near(addr, 256u << 20)) {
+        uint8_t *rx, *rw;
+        size_t n = (len + TL_XMEM_PAGE - 1) & ~(size_t)(TL_XMEM_PAGE - 1);
+        if (tl_xmem_alloc(n, &rx, &rw)) {
+            memset(rw, 0, n);
+            tl_note_once("a JIT's code memory (mmap hinted near the code) comes from the JIT region");
+            mm_trace("mmap-jit", rx, len, prot, flags);
             return rx;
         }
     }
@@ -983,6 +1199,14 @@ static void *b_mmap(void *addr, size_t len, int prot, int flags, int fd, long of
             : mmap(addr, len, prot_filter(prot, "mmap"), df, (flags & 0x20) ? -1 : fd, off);
     if (r == MAP_FAILED && (errno == ENOMEM || force_phantom) && prot == 0 && (flags & 0x20) && !(flags & 0x10)) { r = phantom_reserve(len); if (r != MAP_FAILED) errno = 0; }
     TL_ERRNO_END();
+    /* a file mapped executable (libffi's trampolines: its own library's code page, or a temporary file holding a copy): a phone
+       can not make file pages executable, and a library's file offsets are not where the loader put its code, so the mapping
+       fails here as it would there, and libffi takes anonymous executable memory instead (a piece of the JIT region) */
+    if (r != MAP_FAILED && (prot & PROT_EXEC) && !(flags & 0x20)) {
+        tl_note_once("a file was mapped executable (libffi trampolines): refused, so anonymous executable memory is used");
+        TL_ERRNO_BEGIN(); munmap(r, len); TL_ERRNO_END();
+        tl_set_guest_errno(13); r = MAP_FAILED;
+    }
     if (r != MAP_FAILED && (flags & 0x20)) anon_add(r, len);
     mm_trace("mmap", r, len, prot, flags);
     if (r == MAP_FAILED) tl_log_line("mm: mmap FAILED len=%#zx prot=%d flags=%#x errno=%d", len, prot, flags, errno);
@@ -1007,15 +1231,54 @@ static bool anon_contains(uintptr_t addr, size_t len)
 
 /* A guest turning its own anonymous memory executable is a JIT (LuaJIT, a regex engine) and can not be given that; saying so lets it fall back to its interpreter, where
  * pretending to succeed would have it jump into data. */
+const char *tl_ld_symbol_at(const void *addr, const char **lib_name, const void **sym_addr);
 static int b_mprotect(void *a, size_t l, int prot)
 {
     /* Code a hooking library is about to patch: its permissions stay as they are, and its stores are carried out through
      * the writable view as they fault (husk-tl-codewrite.c). */
     if (tl_codewrite_enabled() && tl_xmem_contains(a)) { mm_trace("mprotect", a, l, prot, 0); return 0; }
-    if ((prot & PROT_EXEC) && anon_contains((uintptr_t)a, l)) {
-        tl_note_once("mprotect asked to make the guest's own memory executable: refused");
-        tl_set_guest_errno(13);                                                                                            /* EACCES */
-        return -1;
+    if (prot & PROT_EXEC) {
+        /* the host's own code (a guest that patches "the linker", which here is Apple's): never touched */
+        Dl_info di;
+        if (dladdr(a, &di) && di.dli_fname && !tl_xmem_contains(a)) {
+            { const char *lib = NULL; const void *sa = NULL; const char *sym = tl_ld_symbol_at(__builtin_return_address(0), &lib, &sa);
+              static int said; if (said++ < 4) tl_log_line("bionic: mprotect(%p, %#zx, %d) on the host's code (%s %s) asked by %s %s: refused", a, l, prot,
+                  di.dli_fname ? strrchr(di.dli_fname, '/') + 1 : "?", di.dli_sname ? di.dli_sname : "?", lib ? lib : "?", sym ? sym : "?"); }
+            tl_set_guest_errno(13);
+            return -1;
+        }
+        /* the guest's own memory it wrote code into (Meta's and ByteDance's stubs, a JIT): made executable when the system lets a
+         * process do that (a debugger attached for JIT, or a Mac), write access dropped if both were asked for (W^X); refused
+         * otherwise, which lets a JIT fall back to its interpreter. TL_NO_GUEST_JIT=1 always refuses. */
+        /* the calling thread's own stack (liblinkernsbypass asks for RWX on the page it keeps a local in): left writable and as it
+         * is -- dropping write there for W^X would leave the thread unable to push a frame. Heap pages still get the real attempt
+         * below (a JIT writing into malloc'd memory needs it executable, or EACCES so it falls back). */
+        {
+            pthread_t me = pthread_self();
+            uintptr_t top = (uintptr_t)pthread_get_stackaddr_np(me), low = top - pthread_get_stacksize_np(me);
+            if ((uintptr_t)a >= low && (uintptr_t)a < top) {
+                tl_note_once("mprotect asked to make a stack page executable: left as it is");
+                mm_trace("mprotect", a, l, prot, 0);
+                return 0;
+            }
+        }
+        static int allow = -1;
+        if (allow < 0) allow = getenv("TL_NO_GUEST_JIT") ? 0 : 1;
+        int r = -1;
+        if (allow) {
+            TL_ERRNO_BEGIN();
+            r = mprotect(a, l, prot & (PROT_READ | PROT_WRITE | PROT_EXEC));
+            if (r != 0 && (prot & PROT_WRITE)) r = mprotect(a, l, (prot & ~PROT_WRITE) & (PROT_READ | PROT_EXEC));
+            TL_ERRNO_END();
+            if (r == 0) { sys_icache_invalidate(a, l); tl_note_once("the guest made memory of its own executable (generated code)"); }
+        }
+        if (r != 0) {
+            tl_note_once("mprotect asked to make the guest's own memory executable: refused");
+            tl_set_guest_errno(13);                                                                                        /* EACCES */
+            return -1;
+        }
+        mm_trace("mprotect", a, l, prot, 0);
+        return 0;
     }
     TL_ERRNO_BEGIN(); int r = mprotect(a, l, prot_filter(prot, "mprotect")); int e = errno; TL_ERRNO_END(); mm_trace("mprotect", a, l, prot, r ? e : 0); return r; }
 static int b_madvise(void *a, size_t l, int adv)
@@ -1132,18 +1395,8 @@ static int b_clock_nanosleep(int id, int flags, const struct timespec *req, stru
         if (d.tv_sec < 0) return 0;
         rem = NULL;
     }
-    return precise_sleep(&d, rem) == 0 ? 0 : (errno == EINTR ? 4 : 22);
-}
-static int b_fstatfs(int fd, guest_statfs *g)
-{
-    struct statfs s;
-    TL_ERRNO_BEGIN(); int r = fstatfs(fd, &s); TL_ERRNO_END();
-    if (r == 0) {
-        memset(g, 0, sizeof(*g));
-        g->f_type = 0xEF53; g->f_bsize = s.f_bsize; g->f_blocks = s.f_blocks; g->f_bfree = s.f_bfree;
-        g->f_bavail = s.f_bavail; g->f_files = s.f_files; g->f_ffree = s.f_ffree; g->f_namelen = 255; g->f_frsize = s.f_bsize;
-    }
-    return r;
+    if (precise_sleep(&d, rem)) return tl_errno_to_guest(errno);
+    return 0;
 }
 
 /* ---------------------------------------------------------------- signals */
@@ -1265,6 +1518,13 @@ typedef struct { void *ss_sp; int ss_flags; int pad; size_t ss_size; } guest_sta
 static int b_sigaltstack(const guest_stack_t *ss, guest_stack_t *old)
 {
     stack_t d, od;
+    /* Android's MINSIGSTKSZ is 5 KB, Darwin's 32 KB: crashpad's smaller stack is kept for the guest to read back, not installed */
+    static __thread guest_stack_t small;
+    if (ss && !(ss->ss_flags & 2) && ss->ss_size < MINSIGSTKSZ) {
+        if (old) { *old = small; if (!old->ss_sp) old->ss_flags = 2; }
+        small = *ss; return 0;
+    }
+    if (!ss && old && small.ss_sp) { *old = small; return 0; }
     if (ss) { d.ss_sp = ss->ss_sp; d.ss_size = ss->ss_size; d.ss_flags = ss->ss_flags & 2 ? SS_DISABLE : 0; }
     TL_ERRNO_BEGIN(); int r = sigaltstack(ss ? &d : NULL, old ? &od : NULL); TL_ERRNO_END();
     if (old && r == 0) { old->ss_sp = od.ss_sp; old->ss_size = od.ss_size; old->ss_flags = od.ss_flags & SS_DISABLE ? 2 : 0; }
@@ -1492,7 +1752,60 @@ static long linux_syscall_impl(long a0, long a1, long a2, long a3, long a4, long
     case 122: case 123: return 0;                                                       /* sched_setaffinity / getaffinity */
     case 167: return 0;                                                                 /* prctl */
     case 160: return 0;                                                                 /* uname */
+    case 47: {                                                                          /* fallocate: growing the file (Superpack maps it at its full size, then writes) */
+        if (a1) return -95;
+        struct stat st;
+        if (fstat((int)a0, &st)) return -tl_errno_to_guest(errno);
+        if (st.st_size >= a2 + a3) return 0;
+        return ftruncate((int)a0, a2 + a3) ? -tl_errno_to_guest(errno) : 0;
+    }
+    case 48: {                                                                          /* faccessat: only AT_FDCWD */
+        if ((int)a0 != -100) return -38;
+        char buf[1024]; const char *p = tl_path_resolve((const char *)a1, buf, sizeof(buf));
+        return access(p, (int)a2) ? -tl_errno_to_guest(errno) : 0;
+    }
+    case 62: { off_t r = lseek((int)a0, (off_t)a1, (int)a2); return r < 0 ? -tl_errno_to_guest(errno) : (long)r; }
+    case 101: { int r = nanosleep((const struct timespec *)a0, (struct timespec *)a1); return r < 0 ? -tl_errno_to_guest(errno) : 0; }
+    case 124: sched_yield(); return 0;
+    case 132: return 0;                                                                 /* sigaltstack: accepted (guest handlers are not installed) */
+    /* memory and file status by raw system call (packers and protectors avoid libc): through the same shims as the calls */
+    case 222: { void *r = b_mmap((void *)a0, (size_t)a1, (int)a2, (int)a3, (int)a4, a5); return r == (void *)-1 ? -*tl_guest_errno_ptr() : (long)r; }
+    case 215: { int r = b_munmap((void *)a0, (size_t)a1); return r < 0 ? -*tl_guest_errno_ptr() : 0; }
+    case 226: { int r = b_mprotect((void *)a0, (size_t)a1, (int)a2); return r < 0 ? -*tl_guest_errno_ptr() : 0; }
+    case 79:  { int r = b_fstatat((int)a0, (const char *)a1, (guest_stat *)a2, (int)a3); return r < 0 ? -*tl_guest_errno_ptr() : 0; }
+    case 80:  { int r = b_fstat((int)a0, (guest_stat *)a1); return r < 0 ? -*tl_guest_errno_ptr() : 0; }
+    case 96: { uint64_t t = 0; pthread_threadid_np(NULL, &t); return (long)t; }        /* set_tid_address */
+    case 99: return 0;                                                                  /* set_robust_list */
+    case 117: return -1;                                                                /* ptrace: EPERM */
     default: break;
+    }
+    /* the rest, by the libc function bionic would have made the call through: called as the guest calls it (arguments in
+       registers), -1 and errno turned into -errno as the kernel answers */
+    {
+        static const struct { short nr; const char *fn; } calls[] = {
+            { 19, "eventfd" }, { 20, "epoll_create1" }, { 21, "epoll_ctl" }, { 22, "epoll_pwait" }, { 23, "dup" }, { 24, "dup3" },
+            { 25, "fcntl" }, { 29, "ioctl" }, { 32, "flock" }, { 34, "mkdirat" }, { 35, "unlinkat" }, { 37, "linkat" }, { 38, "renameat" },
+            { 43, "fstatfs" }, { 46, "ftruncate" }, { 49, "chdir" }, { 50, "fchdir" }, { 52, "fchmod" }, { 53, "fchmodat" }, { 55, "fchown" },
+            { 59, "pipe2" }, { 61, "getdents64" }, { 65, "readv" }, { 66, "writev" }, { 67, "pread64" }, { 68, "pwrite64" },
+            { 71, "sendfile" }, { 73, "ppoll" }, { 78, "readlinkat" }, { 82, "fsync" }, { 83, "fdatasync" },
+            { 85, "timerfd_create" }, { 86, "timerfd_settime" }, { 87, "timerfd_gettime" }, { 88, "utimensat" },
+            { 114, "clock_getres" }, { 115, "clock_nanosleep" }, { 163, "getrlimit" }, { 164, "setrlimit" }, { 165, "getrusage" },
+            { 166, "umask" }, { 179, "sysinfo" }, { 198, "socket" }, { 199, "socketpair" }, { 200, "bind" }, { 201, "listen" },
+            { 202, "accept" }, { 203, "connect" }, { 204, "getsockname" }, { 205, "getpeername" }, { 206, "sendto" }, { 207, "recvfrom" },
+            { 208, "setsockopt" }, { 209, "getsockopt" }, { 210, "shutdown" }, { 211, "sendmsg" }, { 212, "recvmsg" }, { 242, "accept4" },
+            { 261, "prlimit64" }, { 281, "execveat" },
+        };
+        for (size_t i = 0; i < sizeof(calls) / sizeof(calls[0]); i++) {
+            if (calls[i].nr != nr) continue;
+            void *tl_bionic_find(const char *name);
+            long (*f)(long, long, long, long, long, long) = (long (*)(long, long, long, long, long, long))tl_bionic_find(calls[i].fn);
+            if (!f && nr == 261) f = (long (*)(long, long, long, long, long, long))tl_bionic_find("prlimit");
+            if (!f) break;
+            *tl_guest_errno_ptr() = 0;
+            long r = f(a0, a1, a2, a3, a4, a5);
+            if (nr == 166) return r;                                                    /* umask's answer is never an error */
+            return r == -1 ? -(*tl_guest_errno_ptr() ? *tl_guest_errno_ptr() : 38) : r;
+        }
     }
     char what[96];
     snprintf(what, sizeof(what), "raw system call %ld is not provided (ENOSYS)", nr);
@@ -1577,19 +1890,22 @@ const tl_bionic_entry tl_tab_io[] = {
     TL_WRAP("__read_chk", b___read_chk), TL_WRAP("write", b_write), TL_WRAP("__write_chk", b___write_chk), TL_WRAP("writev", b_writev),
     TL_WRAP("pread64", b_pread64), TL_WRAP("pwrite64", b_pwrite64), TL_WRAP("pread", b_pread64), TL_WRAP("pwrite", b_pwrite64), TL_WRAP("__pread64_chk", b___pread64_chk), TL_WRAP("__pwrite64_chk", b___pwrite64_chk), TL_WRAP("__pwrite_chk", b___pwrite64_chk), TL_WRAP("__pread_chk", b___pread64_chk), TL_WRAP("lseek", b_lseek), TL_WRAP("lseek64", b_lseek),
     TL_WRAP("dup", b_dup), TL_WRAP("dup2", b_dup2), TL_WRAP("pipe", b_pipe), TL_WRAP("fsync", b_fsync), TL_WRAP("fdatasync", b_fsync),
+    TL_WRAP("mkfifo", b_mkfifo), TL_WRAP("mknod", b_mknod), TL_WRAP("mknodat", b_mknodat), TL_WRAP("mkfifoat", b_mkfifoat),
+    TL_WRAP("eventfd_write", b_eventfd_write), TL_WRAP("eventfd_read", b_eventfd_read), TL_WRAP("setmntent", b_setmntent),
+    TL_WRAP("getmntent", b_getmntent), TL_WRAP("getmntent_r", b_getmntent_r), TL_WRAP("endmntent", b_endmntent),
     TL_WRAP("ftruncate", b_ftruncate), TL_WRAP("ftruncate64", b_ftruncate), TL_WRAP("truncate", b_truncate), TL_WRAP("isatty", b_isatty), TL_WRAP("flock", b_flock),
     TL_WRAP("unlink", b_unlink), TL_WRAP("rmdir", b_rmdir), TL_WRAP("mkdir", b_mkdir), TL_WRAP("access", b_access),
     TL_WRAP("chmod", b_chmod), TL_WRAP("fchmod", b_fchmod), TL_WRAP("link", b_link), TL_WRAP("symlink", b_symlink),
-    TL_WRAP("readlink", b_readlink), TL_WRAP("realpath", b_realpath), TL_WRAP("getcwd", b_getcwd),
+    TL_WRAP("readlink", b_readlink), TL_WRAP("realpath", b_realpath), TL_WRAP("getcwd", b_getcwd), TL_WRAP("__getcwd_chk", b___getcwd_chk),
     TL_WRAP("utimes", b_utimes), TL_WRAP("utime", b_utime), TL_WRAP("futimens", b_futimens),
     TL_WRAP("__umask_chk", b___umask_chk), TL_WRAP("sendfile", b_sendfile), TL_WRAP("sendfile64", b_sendfile),
-    TL_WRAP("stat", b_stat), TL_WRAP("fstatat", b_fstatat), TL_WRAP("fstatat64", b_fstatat), TL_WRAP("lstat", b_lstat), TL_WRAP("fstat", b_fstat), TL_WRAP("lstat64", b_lstat), TL_WRAP("fstat64", b_fstat), TL_WRAP("statfs", b_statfs),
+    TL_WRAP("stat", b_stat), TL_WRAP("fstatat", b_fstatat), TL_WRAP("fstatat64", b_fstatat), TL_WRAP("lstat", b_lstat), TL_WRAP("fstat", b_fstat), TL_WRAP("lstat64", b_lstat), TL_WRAP("fstat64", b_fstat), TL_WRAP("statfs", b_statfs), TL_WRAP("statfs64", b_statfs), TL_WRAP("fstatfs", b_fstatfs), TL_WRAP("fstatfs64", b_fstatfs),
     TL_WRAP("fcntl", b_fcntl), TL_WRAP("ioctl", b_ioctl),
     TL_WRAP("scandir", b_scandir), TL_WRAP("alphasort", b_alphasort), TL_WRAP("versionsort", b_alphasort), TL_WRAP("opendir", b_opendir), TL_WRAP("fdopendir", b_fdopendir), TL_WRAP("dirfd", b_dirfd), TL_WRAP("rewinddir", b_rewinddir), TL_WRAP("readdir", b_readdir), TL_WRAP("closedir", b_closedir),
     TL_WRAP("mmap", b_mmap), TL_WRAP("mmap64", b_mmap), TL_WRAP("readdir64", b_readdir), TL_WRAP("munmap", b_munmap), TL_WRAP("mprotect", b_mprotect), TL_WRAP("madvise", b_madvise),
     TL_WRAP("mremap", b_mremap),
     TL_WRAP("clock_gettime", b_clock_gettime), TL_WRAP("clock_getres", b_clock_getres), TL_WRAP("gettimeofday", b_gettimeofday),
-    TL_WRAP("nanosleep", b_nanosleep), TL_WRAP("clock_nanosleep", b_clock_nanosleep), TL_WRAP("fstatfs", b_fstatfs), TL_WRAP("fstatfs64", b_fstatfs), TL_WRAP("statfs64", b_statfs), TL_WRAP("usleep", b_usleep),
+    TL_WRAP("nanosleep", b_nanosleep), TL_WRAP("clock_nanosleep", b_clock_nanosleep), TL_WRAP("usleep", b_usleep),
     TL_DIRECT(clock), TL_DIRECT(time), TL_DIRECT(difftime), TL_DIRECT(gmtime), TL_DIRECT(gmtime_r), TL_DIRECT(localtime),
     TL_DIRECT(localtime_r), TL_DIRECT(mktime), TL_DIRECT(strftime), TL_DIRECT(strftime_l), TL_DIRECT(tzset),
     TL_DIRECT(tfind), TL_DIRECT(tsearch), TL_DIRECT(tdelete), TL_DIRECT(twalk), TL_DIRECT(stpcpy),
@@ -1601,7 +1917,7 @@ const tl_bionic_entry tl_tab_io[] = {
     TL_WRAP("sigaddset64", b_sigaddset), TL_WRAP("sigdelset64", b_sigdelset),
     TL_WRAP("sigismember", b_sigismember), TL_WRAP("sigismember64", b_sigismember),
     TL_WRAP("sigsuspend", b_sigsuspend), TL_WRAP("sigaltstack", b_sigaltstack), TL_WRAP("raise", b_raise),
-    TL_WRAP("poll", b_poll), TL_WRAP("ppoll", b_ppoll), TL_WRAP("nl_langinfo", b_nl_langinfo), TL_WRAP("getentropy", b_getentropy), TL_WRAP("memmem", b_memmem), TL_WRAP("eventfd_read", b_eventfd_read), TL_WRAP("eventfd_write", b_eventfd_write), TL_WRAP("select", b_select), TL_WRAP("__FD_SET_chk", b___FD_SET_chk),
+    TL_WRAP("poll", b_poll), TL_WRAP("ppoll", b_ppoll), TL_WRAP("nl_langinfo", b_nl_langinfo), TL_WRAP("getentropy", b_getentropy), TL_WRAP("memmem", b_memmem), TL_WRAP("select", b_select), TL_WRAP("__FD_SET_chk", b___FD_SET_chk),
     TL_WRAP("__FD_ISSET_chk", b___FD_ISSET_chk), TL_WRAP("__cmsg_nxthdr", b___cmsg_nxthdr),
     TL_WRAP("inotify_init", b_inotify_init), TL_WRAP("inotify_add_watch", b_inotify_add_watch),
     TL_END
@@ -1652,6 +1968,8 @@ static int b_mkdirat(int dirfd, const char *path, unsigned mode)
     TL_ERRNO_BEGIN(); int r = mkdirat(dirfd, path, (mode_t)mode); TL_ERRNO_END();
     return r;
 }
+static long b_readlinkat(int dirfd, const char *path, char *buf, size_t n);
+static long b___readlinkat_chk(int dirfd, const char *path, char *buf, size_t n, size_t bl) { (void)bl; return b_readlinkat(dirfd, path, buf, n); }
 static long b_readlinkat(int dirfd, const char *path, char *buf, size_t n)
 {
     if (at_plain(dirfd, path)) return b_readlink(path, buf, n);
@@ -1723,7 +2041,7 @@ static long b_pathconf(const char *p, int name)
 
 const tl_bionic_entry tl_tab_io2[] = {
     TL_WRAP("openat", b_openat), TL_WRAP("__openat_2", b___openat_2), TL_WRAP("faccessat", b_faccessat), TL_WRAP("mkdirat", b_mkdirat),
-    TL_WRAP("readlinkat", b_readlinkat), TL_WRAP("__readlink_chk", b___readlink_chk), TL_WRAP("renameat", b_renameat), TL_WRAP("symlinkat", b_symlinkat),
+    TL_WRAP("readlinkat", b_readlinkat), TL_WRAP("__readlinkat_chk", b___readlinkat_chk), TL_WRAP("__readlink_chk", b___readlink_chk), TL_WRAP("renameat", b_renameat), TL_WRAP("symlinkat", b_symlinkat),
     TL_WRAP("__poll_chk", b___poll_chk), TL_WRAP("unlinkat", b_unlinkat), TL_WRAP("fchmodat", b_fchmodat), TL_WRAP("fchown", b_fchown),
     TL_WRAP("chdir", b_chdir), TL_WRAP("utimensat", b_utimensat), TL_WRAP("stat64", b_stat), TL_WRAP("statvfs", b_statvfs),
     TL_WRAP("statvfs64", b_statvfs), TL_WRAP("pathconf", b_pathconf),

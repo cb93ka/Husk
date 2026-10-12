@@ -32,6 +32,10 @@ public class Activity extends ContextThemeWrapper implements Window.Callback, Ke
     private ActionBar mActionBar;
     private final ArrayList<Application.ActivityLifecycleCallbacks> mLifecycleCallbacks = new ArrayList<>();
     private FragmentManager mFragments;
+    /* how far the platform fragments may go (FragmentManager's host states): created, activity created, started, resumed */
+    private int mFragmentHost;
+    final int huskFragmentHost() { return mFragmentHost; }
+    private void fragmentHost(int state) { mFragmentHost = state; if (mFragments != null) mFragments.huskHostState(state); }
     private int mRequestedOrientation = -1;
     private husk.Manifest.Component mInfo;
 
@@ -39,8 +43,12 @@ public class Activity extends ContextThemeWrapper implements Window.Callback, Ke
 
     // ---- husk.AppRunner's side
     /** As Activity.attach: the base context, the window, the intent. */
+    private boolean mAttaching;
     public final void huskAttach(Context base, Application app, Intent intent, husk.Manifest.Component info, Activity caller, int requestCode) {
-        attachBaseContext(base);
+        /* as Activity.attach: the window is made after attachBaseContext, so getWindow() is null in it (AppCompat's delegate
+           installs itself into a window it finds there, reading the theme before the base context is set -- Todoist) */
+        mAttaching = true;
+        try { attachBaseContext(base); } finally { mAttaching = false; }
         mApplication = app;
         mIntent = intent != null ? intent : new Intent(Intent.ACTION_MAIN);
         mInfo = info;
@@ -63,14 +71,25 @@ public class Activity extends ContextThemeWrapper implements Window.Callback, Ke
         getLayoutInflater().setPrivateFactory(this);
         each(c -> c.onActivityPreCreated(this, state));
         mCalled = false;
+        mFragmentHost = FragmentManager.HOST_CREATED;
         onCreate(state);
         if (!mCalled) throw new SuperNotCalledException("Activity " + getClass().getName() + " did not call through to super.onCreate()");
+        fragmentHost(FragmentManager.HOST_ACTIVITY_CREATED);   /* as performCreate: fragments hear onActivityCreated after onCreate */
+        /* as Activity.performCreate: visibility comes from the theme after onCreate, so setVisible(false) there does not hide
+           the activity (Spotify's login calls it and never shows itself again) */
+        try {
+            android.content.res.TypedArray ta = getTheme().obtainStyledAttributes(new int[] { android.R.attr.windowNoDisplay });
+            mVisibleFromClient = !ta.getBoolean(0, false);
+            ta.recycle();
+        } catch (RuntimeException e) { mVisibleFromClient = true; }
         if (!mFinished) onPostCreate(state);            /* as ActivityThread: an activity that finished in onCreate goes no further */
         each(c -> c.onActivityPostCreated(this, state));
     }
     public final void huskStart() {
         each(c -> c.onActivityPreStarted(this));
         mCalled = false; onStart(); mStarted = true;
+        fragmentHost(FragmentManager.HOST_STARTED);
+        if (mLoaders != null) mLoaders.doStart();
         each(c -> c.onActivityPostStarted(this));
     }
     public final void huskRestart() { onRestart(); }
@@ -79,26 +98,33 @@ public class Activity extends ContextThemeWrapper implements Window.Callback, Ke
         mCalled = false;
         onResume();
         mResumed = true;
+        fragmentHost(FragmentManager.HOST_RESUMED);
         onPostResume();
         each(c -> c.onActivityPostResumed(this));
         if (mVisibleFromClient) makeVisible();
     }
     public final void huskPause() {
         each(c -> c.onActivityPrePaused(this));
+        fragmentHost(FragmentManager.HOST_STARTED);            /* fragments pause before the activity, as performPause */
         mResumed = false; onPause();
         each(c -> c.onActivityPostPaused(this));
+        android.content.HuskSharedPreferences.flushAll();      /* as QueuedWork after onPause */
     }
     public final void huskStop() {
         if (mStarted) {                                  /* one that finished in onCreate never started, and does not stop */
             each(c -> c.onActivityPreStopped(this));
+            fragmentHost(FragmentManager.HOST_ACTIVITY_CREATED);
             mStarted = false; onStop();
+            if (mLoaders != null) mLoaders.doStop();
             each(c -> c.onActivityPostStopped(this));
         }
         if (mWindow != null && mWindow.peekDecorView() != null) { husk.ViewRoot r = husk.ViewRoot.of(mWindow.peekDecorView()); if (r != null) r.remove(); }
     }
     public final void huskDestroy() {
         each(c -> c.onActivityPreDestroyed(this));
+        fragmentHost(FragmentManager.HOST_NONE);
         mDestroyed = true; onDestroy();
+        if (mLoaders != null) mLoaders.doDestroy();
         each(c -> c.onActivityPostDestroyed(this));
         if (mWindow != null) mWindow.huskDestroy();
     }
@@ -139,6 +165,13 @@ public class Activity extends ContextThemeWrapper implements Window.Callback, Ke
     public void onSaveInstanceState(Bundle out, android.os.PersistableBundle p) { onSaveInstanceState(out); }
     protected void onRestoreInstanceState(Bundle state) {}
     protected void onNewIntent(Intent i) {}
+    /** A new intent for this activity (singleTop, or brought back by CLEAR_TOP): as Android, paused around onNewIntent when it is up. */
+    public void huskNewIntent(Intent i) {
+        boolean up = isResumedHusk();
+        if (up) huskPause();
+        onNewIntent(i);
+        if (up) huskResume();
+    }
     protected void onActivityResult(int request, int result, Intent data) {}
     public void onActivityReenter(int result, Intent data) {}
     protected void onUserLeaveHint() {}
@@ -185,6 +218,7 @@ public class Activity extends ContextThemeWrapper implements Window.Callback, Ke
 
     // ---- the window
     public Window getWindow() {
+        if (mWindow == null && mAttaching) return null;
         if (mWindow == null) {
             mWindow = new Window(this);
             mWindow.setCallback(this);
@@ -233,7 +267,14 @@ public class Activity extends ContextThemeWrapper implements Window.Callback, Ke
     public void onDetachedFromWindow() {}
     public void onWindowAttributesChanged(WindowManager.LayoutParams p) {}
     public boolean hasWindowFocus() { View d = mWindow != null ? mWindow.peekDecorView() : null; return d != null && d.hasWindowFocus(); }
-    public void setVisible(boolean v) { mVisibleFromClient = v; if (mWindow != null && mWindow.peekDecorView() != null) mWindow.peekDecorView().setVisibility(v ? View.VISIBLE : View.INVISIBLE); }
+    /* as Android: once started, showing the activity again adds its window (Spotify's login hides itself until it has loaded) */
+    public void setVisible(boolean v) {
+        if (mVisibleFromClient == v) return;
+        mVisibleFromClient = v;
+        if (!mStarted) return;
+        if (v) makeVisible();
+        else if (mWindow != null && mWindow.peekDecorView() != null) mWindow.peekDecorView().setVisibility(View.INVISIBLE);
+    }
     public void setRequestedOrientation(int o) { mRequestedOrientation = o; husk.Native.setOrientation(o); }
     public int getRequestedOrientation() { return mRequestedOrientation; }
     public void setShowWhenLocked(boolean b) {}
@@ -290,7 +331,7 @@ public class Activity extends ContextThemeWrapper implements Window.Callback, Ke
         if (husk.AppRunner.top() == this && husk.AppRunner.stackSize() == 1) android.util.Log.i("Husk", "the last activity finishes", new Throwable("finish() called from"));
         husk.AppRunner.finish(this);
     }
-    public void finishAffinity() { husk.AppRunner.finishAll(); }
+    public void finishAffinity() { husk.AppRunner.finishAffinity(this); }
     public void finishAndRemoveTask() { finishAffinity(); }
     public void finishAfterTransition() { finish(); }
     public void finishActivity(int request) {}
@@ -312,7 +353,8 @@ public class Activity extends ContextThemeWrapper implements Window.Callback, Ke
     interface Cursor_ {}
     public FragmentManager getFragmentManager() { if (mFragments == null) mFragments = new FragmentManager(this); return mFragments; }
     public void onAttachFragment(Fragment f) {}
-    public LoaderManager getLoaderManager() { return null; }
+    private LoaderManagerImpl mLoaders;
+    public LoaderManager getLoaderManager() { if (mLoaders == null) mLoaders = new LoaderManagerImpl(mStarted); return mLoaders; }
     public void showDialog(int id) {}
     public final boolean showDialog(int id, Bundle args) { return false; }
     public void dismissDialog(int id) {}
@@ -418,11 +460,6 @@ public class Activity extends ContextThemeWrapper implements Window.Callback, Ke
     public interface ScreenCaptureCallback {
         void onScreenCaptured();
     }
-    // ---- generated by tools/compat/genstubs.py: the platform's nested classes this class does not write
-    public interface TranslucentConversionListener {
-        void onTranslucentConversionComplete(boolean p0);
-    }
-    // ---- end of generated nested classes
             // ---- generated by tools/compat/fillmembers.py: the platform's members this class does not write (signatures only)
             private final java.util.HashMap<String, Object> huskFill = new java.util.HashMap<>();
             public static final int DONT_FINISH_TASK_WITH_ACTIVITY = 0;
@@ -546,4 +583,9 @@ public class Activity extends ContextThemeWrapper implements Window.Callback, Ke
             public void unregisterRemoteAnimations() {}
             public void updateUiTranslationState(int p0, android.view.translation.TranslationSpec p1, android.view.translation.TranslationSpec p2, java.util.List p3, android.view.translation.UiTranslationSpec p4) {}
             // ---- end of generated members
+    // ---- generated by tools/compat/genstubs.py: the platform's nested classes this class does not write
+    public interface TranslucentConversionListener {
+        void onTranslucentConversionComplete(boolean p0);
+    }
+    // ---- end of generated nested classes
 }

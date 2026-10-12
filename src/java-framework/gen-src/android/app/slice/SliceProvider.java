@@ -24,8 +24,6 @@ public abstract class SliceProvider extends android.content.ContentProvider {
     public static android.content.Intent createPermissionIntent(android.content.Context p0, android.net.Uri p1, java.lang.String p2) { return null; }
     public static android.app.PendingIntent createPermissionPendingIntent(android.content.Context p0, android.net.Uri p1, java.lang.String p2) { return null; }
     public static java.lang.CharSequence getPermissionString(android.content.Context p0, java.lang.String p1) { return null; }
-    public void attachInfo(android.content.Context p0, android.content.pm.ProviderInfo p1) {}
-    public android.os.Bundle call(java.lang.String p0, java.lang.String p1, android.os.Bundle p2) { return null; }
     public android.app.slice.Slice createPermissionSlice(android.content.Context p0, android.net.Uri p1, java.lang.String p2) { return null; }
     public int delete(android.net.Uri p0, java.lang.String p1, java.lang.String[] p2) { return 0; }
     public java.lang.String getType(android.net.Uri p0) { return null; }
@@ -36,8 +34,6 @@ public abstract class SliceProvider extends android.content.ContentProvider {
     public android.net.Uri onMapIntentToUri(android.content.Intent p0) { return null; }
     public void onSlicePinned(android.net.Uri p0) {}
     public void onSliceUnpinned(android.net.Uri p0) {}
-    public android.database.Cursor query(android.net.Uri p0, java.lang.String[] p1, android.os.Bundle p2, android.os.CancellationSignal p3) { return null; }
     public android.database.Cursor query(android.net.Uri p0, java.lang.String[] p1, java.lang.String p2, java.lang.String[] p3, java.lang.String p4) { return null; }
-    public android.database.Cursor query(android.net.Uri p0, java.lang.String[] p1, java.lang.String p2, java.lang.String[] p3, java.lang.String p4, android.os.CancellationSignal p5) { return null; }
     public int update(android.net.Uri p0, android.content.ContentValues p1, java.lang.String p2, java.lang.String[] p3) { return 0; }
 }

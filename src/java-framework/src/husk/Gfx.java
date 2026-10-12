@@ -19,6 +19,7 @@ public final class Gfx {
     public static native void cvFree(long cv);
     public static native int cvSave(long cv);
     public static native int cvSaveLayer(long cv, float l, float t, float r, float b, int alpha);
+    public static native int cvSaveLayerMode(long cv, float l, float t, float r, float b, int alpha, int mode);
     public static native void cvRestore(long cv);
     public static native void cvRestoreTo(long cv, int count);
     public static native int cvSaveCount(long cv);

@@ -9,7 +9,6 @@ public class ZoomButton extends android.widget.ImageButton implements android.vi
     public ZoomButton(android.content.Context p0, android.util.AttributeSet p1, int p2) { super(p0, p1, p2); }
     public ZoomButton(android.content.Context p0, android.util.AttributeSet p1, int p2, int p3) { super(p0, p1, p2, p3); }
     public boolean dispatchUnhandledMove(android.view.View p0, int p1) { return false; }
-    public java.lang.CharSequence getAccessibilityClassName() { return (java.lang.CharSequence) huskProps.get("AccessibilityClassName"); }
     public boolean onKeyUp(int p0, android.view.KeyEvent p1) { return false; }
     public boolean onLongClick(android.view.View p0) { return false; }
     public boolean onTouchEvent(android.view.MotionEvent p0) { return false; }

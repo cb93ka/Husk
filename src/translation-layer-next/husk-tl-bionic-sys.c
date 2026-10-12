@@ -115,7 +115,13 @@ static int b_mincore(void *addr, size_t len, unsigned char *vec)
 
 /* No directory walks yet: the callers (temporary-directory cleanup) treat failure as nothing to do. */
 static int b_nftw(const char *dir, void *fn, int depth, int flags) { (void)dir; (void)fn; (void)depth; (void)flags; tl_set_guest_errno(38); return -1; }
-static void *b_getpwnam(const char *name) { (void)name; return NULL; }
+/* the app's own user by name (u0_a1); there are no others */
+static void *b_getpwnam(const char *name)
+{
+    const void *tl_bionic_app_passwd(void);
+    const char *const *pw = tl_bionic_app_passwd();
+    return name && !strcmp(name, pw[0]) ? (void *)pw : NULL;
+}
 
 /* ---------------------------------------------------------------- strings, numbers */
 

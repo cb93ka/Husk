@@ -16,7 +16,5 @@ public abstract class SettingInjectorService extends android.app.Service {
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
     protected abstract boolean onGetEnabled();
     protected abstract java.lang.String onGetSummary();
-    public void onStart(android.content.Intent p0, int p1) {}
-    public int onStartCommand(android.content.Intent p0, int p1, int p2) { return 0; }
     SettingInjectorService() { this((java.lang.String) null); }
 }

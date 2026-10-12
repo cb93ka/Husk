@@ -10,24 +10,10 @@ public class AnimatedImageDrawable extends android.graphics.drawable.Drawable im
     public AnimatedImageDrawable(long p0, android.graphics.ImageDecoder p1, int p2, int p3, long p4, boolean p5, int p6, int p7, android.graphics.Rect p8, java.io.InputStream p9, android.content.res.AssetFileDescriptor p10) { super(); }
     public void clearAnimationCallbacks() {}
     public void draw(android.graphics.Canvas p0) {}
-    public int getAlpha() { return (huskProps.get("Alpha") instanceof Integer ? (Integer) huskProps.get("Alpha") : 0); }
-    public android.graphics.ColorFilter getColorFilter() { return (android.graphics.ColorFilter) huskProps.get("ColorFilter"); }
-    public int getIntrinsicHeight() { return (huskProps.get("IntrinsicHeight") instanceof Integer ? (Integer) huskProps.get("IntrinsicHeight") : 0); }
-    public int getIntrinsicWidth() { return (huskProps.get("IntrinsicWidth") instanceof Integer ? (Integer) huskProps.get("IntrinsicWidth") : 0); }
     public int getLoopCount(int p0) { return 0; }
-    public int getOpacity() { return (huskProps.get("Opacity") instanceof Integer ? (Integer) huskProps.get("Opacity") : 0); }
     public int getRepeatCount() { return (huskProps.get("RepeatCount") instanceof Integer ? (Integer) huskProps.get("RepeatCount") : 0); }
-    public void inflate(android.content.res.Resources p0, org.xmlpull.v1.XmlPullParser p1, android.util.AttributeSet p2, android.content.res.Resources.Theme p3) {}
-    public boolean isAutoMirrored() { return (huskProps.get("AutoMirrored") instanceof Boolean ? (Boolean) huskProps.get("AutoMirrored") : false); }
-    public boolean isFilterBitmap() { return (huskProps.get("FilterBitmap") instanceof Boolean ? (Boolean) huskProps.get("FilterBitmap") : false); }
     public boolean isRunning() { return (huskProps.get("Running") instanceof Boolean ? (Boolean) huskProps.get("Running") : false); }
-    public void onBoundsChange(android.graphics.Rect p0) {}
-    public boolean onLayoutDirectionChanged(int p0) { return false; }
     public void registerAnimationCallback(android.graphics.drawable.Animatable2.AnimationCallback p0) {}
-    public void setAlpha(int p0) { huskProps.put("Alpha", Integer.valueOf(p0)); }
-    public void setAutoMirrored(boolean p0) { huskProps.put("AutoMirrored", Boolean.valueOf(p0)); }
-    public void setColorFilter(android.graphics.ColorFilter p0) { huskProps.put("ColorFilter", p0); }
-    public void setFilterBitmap(boolean p0) { huskProps.put("FilterBitmap", Boolean.valueOf(p0)); }
     public void setLoopCount(int p0) { huskProps.put("LoopCount", Integer.valueOf(p0)); }
     public void setRepeatCount(int p0) { huskProps.put("RepeatCount", Integer.valueOf(p0)); }
     public void start() {}

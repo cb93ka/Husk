@@ -26,10 +26,7 @@ public abstract class CursorTreeAdapter extends android.widget.BaseExpandableLis
     public boolean isChildSelectable(int p0, int p1) { return false; }
     protected abstract android.view.View newChildView(android.content.Context p0, android.database.Cursor p1, boolean p2, android.view.ViewGroup p3);
     protected abstract android.view.View newGroupView(android.content.Context p0, android.database.Cursor p1, boolean p2, android.view.ViewGroup p3);
-    public void notifyDataSetChanged() {}
     public void notifyDataSetChanged(boolean p0) {}
-    public void notifyDataSetInvalidated() {}
-    public void onGroupCollapsed(int p0) {}
     public android.database.Cursor runQueryOnBackgroundThread(java.lang.CharSequence p0) { return null; }
     public void setChildrenCursor(int p0, android.database.Cursor p1) {}
     public void setFilterQueryProvider(android.widget.FilterQueryProvider p0) { huskProps.put("FilterQueryProvider", p0); }

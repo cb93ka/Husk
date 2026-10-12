@@ -7,7 +7,6 @@ public abstract class AsyncQueryHandler extends android.os.Handler {
     public AsyncQueryHandler(android.content.ContentResolver p0) { super(); }
     public void cancelOperation(int p0) {}
     protected android.os.Handler createHandler(android.os.Looper p0) { return null; }
-    public void handleMessage(android.os.Message p0) {}
     protected void onDeleteComplete(int p0, java.lang.Object p1, int p2) {}
     protected void onInsertComplete(int p0, java.lang.Object p1, android.net.Uri p2) {}
     protected void onQueryComplete(int p0, java.lang.Object p1, android.database.Cursor p2) {}

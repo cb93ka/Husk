@@ -7,14 +7,12 @@ public abstract class MediaBrowserService extends android.app.Service {
     public static final java.lang.String KEY_MEDIA_ITEM = "media_item";
     public static final java.lang.String SERVICE_INTERFACE = "android.media.browse.MediaBrowserService";
     public MediaBrowserService() { super(); }
-    public void dump(java.io.FileDescriptor p0, java.io.PrintWriter p1, java.lang.String[] p2) {}
     public android.os.Bundle getBrowserRootHints() { return (android.os.Bundle) huskProps.get("BrowserRootHints"); }
     public android.media.session.MediaSessionManager.RemoteUserInfo getCurrentBrowserInfo() { return (android.media.session.MediaSessionManager.RemoteUserInfo) huskProps.get("CurrentBrowserInfo"); }
     public android.media.session.MediaSession.Token getSessionToken() { return (android.media.session.MediaSession.Token) huskProps.get("SessionToken"); }
     public void notifyChildrenChanged(java.lang.String p0) {}
     public void notifyChildrenChanged(java.lang.String p0, android.os.Bundle p1) {}
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
-    public void onCreate() {}
     public abstract android.service.media.MediaBrowserService.BrowserRoot onGetRoot(java.lang.String p0, int p1, android.os.Bundle p2);
     public abstract void onLoadChildren(java.lang.String p0, android.service.media.MediaBrowserService.Result p1);
     public void onLoadChildren(java.lang.String p0, android.service.media.MediaBrowserService.Result p1, android.os.Bundle p2) {}

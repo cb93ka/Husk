@@ -33,8 +33,10 @@ struct ContentView: View {
     @ObservedObject private var tlStore = TranslationLayerStore.shared
     @ObservedObject private var language = LanguageVersion.shared
     @ObservedObject private var crash = CrashReport.shared
+    @ObservedObject private var massTest = MassTest.shared
     @ObservedObject private var updates = AppUpdates.shared
     @State private var showWhatsNew = false
+    @AppStorage(Holiday.key) private var holiday = true
 
     var body: some View {
         ZStack {
@@ -60,12 +62,21 @@ struct ContentView: View {
                     .tabItem { Label(LocalizedStringKey(L("Store")), systemImage: "cart.fill") }
                     .tag(HuskTab.store)
 
+                FAQTab()
+                    .tabItem { Label("FAQ", systemImage: "questionmark.circle.fill") }
+                    .tag(HuskTab.help)
+
                 SettingsTab()
                     .tabItem { Label(LocalizedStringKey(L("Settings")), systemImage: "gearshape.fill") }
                     .tag(HuskTab.settings)
             }
             .id(language.value)      // drawn again in the new language when it changes
             .opacity(showGuestScreen && started && runner.isRunning ? 0 : 1)
+
+            // Christmas: snow over the tabs (never over Android or an app's window, which come after it)
+            if holiday && !(showGuestScreen && started && runner.isRunning) {
+                Snowfall().ignoresSafeArea()
+            }
 
             // Multitasking: an app in a window over everything else in Husk (AppWindows.swift).
             AppWindowLayer()
@@ -162,6 +173,7 @@ struct ContentView: View {
         } message: {
             Text(tlStore.lastError ?? "")
         }
+        .task { await CompatibilityStore.shared.refresh() }
         .sheet(isPresented: $router.showFiles) { FilesTab() }
         .sheet(isPresented: $router.showDownloads) { DownloadsTab() }
         // Pictures for the apps here: read the index on launch and whenever the set of apps changes.
@@ -205,9 +217,12 @@ struct ContentView: View {
         } message: {
             Text(Lv(guest.update.detail))
         }
+        .sheet(isPresented: $massTest.shareResults) { ShareSheet(items: [MassTest.resultsURL]) }
         .onAppear {
             crash.checkPreviousRun()
-            if crash.pending == nil { router.resumeSwitch() }
+            // the developer mass test: the last app's fate, then the next app (it clears a crash report it has written down)
+            massTest.resume(crash: crash)
+            if crash.pending == nil, !massTest.active { router.resumeSwitch() }
             if crash.pending == nil, WhatsNew.due { showWhatsNew = true }
             router.openGuest = { showGuestScreen = true }
             router.startAndroid = { startFromLibrary() }

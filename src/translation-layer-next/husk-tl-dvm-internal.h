@@ -31,6 +31,8 @@ struct dvm_dex {
     tl_jclass **tcache;             /* by type_idx */
     jobj **scache;                  /* interned constant strings, by string_idx */
     char name[96];
+    int ns;                         /* 0: the boot class path and the app; else the namespace of a DexFile opened at run time */
+    jobj *loader;                   /* a run-time dex: the class loader its classes were first defined through (Class.getClassLoader) */
 };
 
 struct dvm_field {

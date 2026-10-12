@@ -30,7 +30,6 @@ public class EnvironmentalReverb extends android.media.audiofx.AudioEffect {
     public void setDecayTime(int p0) { huskProps.put("DecayTime", Integer.valueOf(p0)); }
     public void setDensity(short p0) { huskProps.put("Density", Short.valueOf(p0)); }
     public void setDiffusion(short p0) { huskProps.put("Diffusion", Short.valueOf(p0)); }
-    public void setParameterListener(android.media.audiofx.EnvironmentalReverb.OnParameterChangeListener p0) { huskProps.put("ParameterListener", p0); }
     public void setProperties(android.media.audiofx.EnvironmentalReverb.Settings p0) { huskProps.put("Properties", p0); }
     public void setReflectionsDelay(int p0) { huskProps.put("ReflectionsDelay", Integer.valueOf(p0)); }
     public void setReflectionsLevel(short p0) { huskProps.put("ReflectionsLevel", Short.valueOf(p0)); }

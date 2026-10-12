@@ -16,15 +16,8 @@ public class KeyboardView extends android.view.View implements android.view.View
     public boolean isPreviewEnabled() { return (huskProps.get("PreviewEnabled") instanceof Boolean ? (Boolean) huskProps.get("PreviewEnabled") : false); }
     public boolean isProximityCorrectionEnabled() { return (huskProps.get("ProximityCorrectionEnabled") instanceof Boolean ? (Boolean) huskProps.get("ProximityCorrectionEnabled") : false); }
     public boolean isShifted() { return (huskProps.get("Shifted") instanceof Boolean ? (Boolean) huskProps.get("Shifted") : false); }
-    public void onAttachedToWindow() {}
     public void onClick(android.view.View p0) {}
-    public void onDetachedFromWindow() {}
-    public void onDraw(android.graphics.Canvas p0) {}
-    public boolean onHoverEvent(android.view.MotionEvent p0) { return false; }
     protected boolean onLongPress(android.inputmethodservice.Keyboard.Key p0) { return false; }
-    public void onMeasure(int p0, int p1) {}
-    public void onSizeChanged(int p0, int p1, int p2, int p3) {}
-    public boolean onTouchEvent(android.view.MotionEvent p0) { return false; }
     public void setKeyboard(android.inputmethodservice.Keyboard p0) { huskProps.put("Keyboard", p0); }
     public void setOnKeyboardActionListener(android.inputmethodservice.KeyboardView.OnKeyboardActionListener p0) { huskProps.put("OnKeyboardActionListener", p0); }
     public void setPopupOffset(int p0, int p1) {}

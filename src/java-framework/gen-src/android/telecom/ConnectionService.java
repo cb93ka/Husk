@@ -46,7 +46,6 @@ public abstract class ConnectionService extends android.app.Service {
     public void onHandoverFailed(android.telecom.ConnectionRequest p0, int p1) {}
     public void onRemoteConferenceAdded(android.telecom.RemoteConference p0) {}
     public void onRemoteExistingConnectionAdded(android.telecom.RemoteConnection p0) {}
-    public boolean onUnbind(android.content.Intent p0) { return false; }
     protected void removeConnection(android.telecom.Connection p0) {}
     public void setReadyForTest() {}
     public void triggerConferenceRecalculate() {}

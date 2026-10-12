@@ -57,16 +57,26 @@ extension TLReport {
         if !abis.isEmpty && !abis.contains("arm64-v8a") { return nil }
         // An app with Java code and no native code at all runs on Husk's own Java runtime
         if abis.isEmpty { return dexCount > 0 && webKind == nil ? .java : nil }
+        // Unity 6 runs through its own Java activity (UnityPlayerForActivityOrService), on the Java runtime
+        if engine == "Unity 6" { return .java }
         if engine?.hasPrefix("Unity") == true { return .unity }
-        if engine == "Cocos" { return .cocos }
+        // the cocos2d-x driver is Geometry Dash's (FMOD, RobTop's activity); other cocos2d-x games run their Java activity on the Java runtime
+        if engine == "Cocos" { return libraries.contains(where: { $0.name == "libfmod.so" }) ? .cocos : .java }
         if engine == "Minecraft" { return .minecraft }
-        if engine == "SDL" || engine == "Python" { return .sdl }
+        // SDL games run their own Java activity on the Java runtime: many prepare their data there first (Wesnoth unpacks it, OpenTTD
+        // and Luanti copy theirs, launchers come before the game) and SDLActivity's Java drives the native side as on a phone.
+        // python-for-android (Kivy) too: pyjnius needs real Java (proxies, string identity), which only the Java runtime has.
+        // Except Direct3D ports drawing through DXVK (GTA V): they need Vulkan on a Metal layer of their own, which only the SDL driver gives.
+        if engine == "SDL", libraries.contains(where: { $0.name.hasPrefix("libdxvk") }) { return .sdl }
+        if engine == "SDL" || engine == "Python" { return .java }
         if engine == "Unreal Engine" { return .ue4 }
         if engine == "Rockstar" { return .gta }
         // A Godot .NET game carries Mono as well; reports made before the scan knew that called it .NET.
         if engine == "Godot" || libraries.contains(where: { $0.name == "libgodot_android.so" }) { return .godot }
         if engine == "NativeActivity" { return .nativeactivity }
-        if engine == "Flutter" { return .flutter }
+        // Flutter apps too: their plugins are Java (storage, paths, keystore, SQLite) and run there for real, where the Flutter
+        // driver could only answer a few channels itself (Lichess waited forever, Sanmill failed on one).
+        if engine == "Flutter" { return .java }
         if engine == "GameMaker" { return .gamemaker }
         // Everything else with Java code: libGDX games, ordinary apps, React Native and the like, and games whose engine is their
         // own library behind a Java activity (Hill Climb Racing, Supercell's games)
@@ -179,7 +189,7 @@ final class TranslationLayerStore: ObservableObject {
 
     /// Which reading of an app's libraries its report came from. A newer Husk that recognises more (an engine, a kind of game) reads
     /// the apps it already holds again, so they are not left with what the old one knew.
-    nonisolated static let scanVersion = 7
+    nonisolated static let scanVersion = 8
     private var rescanning = false
 
     func reload() {
@@ -259,6 +269,16 @@ final class TranslationLayerStore: ObservableObject {
 
     /// Keep a copy of one app -- one APK, or a base APK and its splits,
     /// picked together -- and report on it.
+    /// One app's APKs (a base and its splits, or a bundle) copied in (the originals stay where they are), and the new app's folder name: the developer mass test takes its APKs
+    /// from a folder of the user's this way, one per launch of Husk.
+    nonisolated static func importCopy(_ urls: [URL]) -> String? {
+        let fm = FileManager.default
+        let before = Set((try? fm.contentsOfDirectory(atPath: TranslationLayer.root.path)) ?? [])
+        guard !urls.isEmpty, ingest(urls, move: false) == nil else { return nil }
+        let after = Set((try? fm.contentsOfDirectory(atPath: TranslationLayer.root.path)) ?? [])
+        return after.subtracting(before).first
+    }
+
     func add(_ urls: [URL], move: Bool = false) {
         guard !urls.isEmpty, busy == nil else { return }
         busy = urls.count == 1 ? L("Adding \(urls[0].lastPathComponent)…")

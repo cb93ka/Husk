@@ -7,7 +7,5 @@ public class HapticGenerator extends android.media.audiofx.AudioEffect implement
     public static android.media.audiofx.HapticGenerator create(int p0) { return new HapticGenerator(); }
     public static boolean isAvailable() { return false; }
     public void close() {}
-    public void release() {}
-    public int setEnabled(boolean p0) { return 0; }
     protected HapticGenerator() { super((java.util.UUID) null, (android.media.AudioDeviceAttributes) null); }
 }

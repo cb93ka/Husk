@@ -10,7 +10,7 @@ import org.xmlpull.v1.XmlPullParser;
 public final class Manifest {
     public static final class Component {
         public String name, kind, authorities, process, permission, parentActivity;
-        public int theme, label, icon, screenOrientation = -1, configChanges, launchMode, windowSoftInputMode, uiOptions;
+        public int theme, label, icon, screenOrientation = -1, configChanges, launchMode, windowSoftInputMode, uiOptions, initOrder;
         public boolean exported, enabled = true, grantUriPermissions;
         public Bundle metaData;
         public final ArrayList<Filter> filters = new ArrayList<>();
@@ -42,12 +42,14 @@ public final class Manifest {
         try {
             XmlBlock.Parser p = new XmlBlock(d, "AndroidManifest.xml").newParser();
             Component cur = null; Filter filter = null;
+            boolean inApp = false;          /* components are only those under <application> (<queries> names packages, intents and providers too) */
             int t;
             TypedValue v = new TypedValue();
             while ((t = p.next()) != XmlPullParser.END_DOCUMENT) {
                 if (t == XmlPullParser.END_TAG) {
                     String n = p.getName();
                     if ("intent-filter".equals(n)) filter = null;
+                    else if ("application".equals(n)) inApp = false;
                     else if ("activity".equals(n) || "activity-alias".equals(n) || "service".equals(n) || "receiver".equals(n) || "provider".equals(n)) cur = null;
                     continue;
                 }
@@ -66,6 +68,7 @@ public final class Manifest {
                 case "uses-permission": permissions.add(p.getAttributeValue(NS, "name")); break;
                 case "uses-library": libraries.add(p.getAttributeValue(NS, "name")); break;
                 case "application":
+                    inApp = true;
                     applicationClass = full(p.getAttributeValue(NS, "name"));
                     appTheme = p.getAttributeResourceValue(NS, "theme", 0);
                     appLabel = p.getAttributeResourceValue(NS, "label", 0);
@@ -78,6 +81,7 @@ public final class Manifest {
                     appComponentFactory = full(p.getAttributeValue(NS, "appComponentFactory"));
                     break;
                 case "activity": case "activity-alias": case "service": case "receiver": case "provider": {
+                    if (!inApp) break;
                     cur = new Component();
                     cur.kind = tag;
                     cur.name = full(p.getAttributeValue(NS, "name"));
@@ -92,6 +96,7 @@ public final class Manifest {
                     cur.screenOrientation = p.getAttributeIntValue(NS, "screenOrientation", cur.screenOrientation);
                     cur.configChanges = p.getAttributeIntValue(NS, "configChanges", cur.configChanges);
                     cur.launchMode = p.getAttributeIntValue(NS, "launchMode", 0);
+                    cur.initOrder = p.getAttributeIntValue(NS, "initOrder", 0);
                     cur.windowSoftInputMode = p.getAttributeIntValue(NS, "windowSoftInputMode", 0);
                     cur.exported = p.getAttributeBooleanValue(NS, "exported", false);
                     cur.enabled = p.getAttributeBooleanValue(NS, "enabled", true);
@@ -111,7 +116,7 @@ public final class Manifest {
                 case "category": if (filter != null) filter.categories.add(p.getAttributeValue(NS, "name")); break;
                 case "data":
                     if (filter != null) {
-                        String s = p.getAttributeValue(NS, "scheme"), h = p.getAttributeValue(NS, "host"), m = p.getAttributeValue(NS, "mimeType");
+                        String s = attrOrRef(p, "scheme"), h = attrOrRef(p, "host"), m = attrOrRef(p, "mimeType");
                         if (s != null) filter.schemes.add(s); if (h != null) filter.hosts.add(h); if (m != null) filter.mimeTypes.add(m);
                     }
                     break;
@@ -147,19 +152,56 @@ public final class Manifest {
         for (Component c : activities) for (Filter f : c.filters) if (f.categories.contains("android.intent.category.LAUNCHER")) return c;
         return activities.isEmpty() ? null : activities.get(0);
     }
+    /** The services (or receivers) of this app an intent names or whose filters take it. */
+    public static java.util.List<Component> match(java.util.List<Component> list, android.content.Intent i) {
+        read();
+        java.util.ArrayList<Component> out = new java.util.ArrayList<>();
+        android.content.ComponentName cn = i.getComponent();
+        if (cn != null) {
+            if (cn.getPackageName() != null && !cn.getPackageName().equals(husk.Native.packageName())) return out;
+            for (Component c : list) if (c.name.equals(cn.getClassName())) { out.add(c); return out; }
+            return out;
+        }
+        String action = i.getAction();
+        if (action == null) return out;
+        if (i.getPackage() != null && !i.getPackage().equals(husk.Native.packageName())) return out;
+        for (Component c : list) for (Filter f : c.filters) if (matches(f, i)) { out.add(c); break; }
+        return out;
+    }
+    /* an attribute that may name a string resource (Shazam's <data android:scheme="@string/...">): kept as "@<id>", read when used */
+    private static String attrOrRef(XmlBlock.Parser p, String name) {
+        int ref = p.getAttributeResourceValue(NS, name, 0);
+        if (ref != 0) return "@" + ref;
+        return p.getAttributeValue(NS, name);
+    }
+    private static String val(String v) {
+        if (v == null || !v.startsWith("@")) return v;
+        try { return husk.ContextImpl.app().getResources().getString(Integer.parseInt(v.substring(1))); } catch (Throwable t) { return v; }
+    }
+    private static boolean hasVal(java.util.List<String> list, String x) { for (String v : list) if (val(v).equals(x)) return true; return false; }
+    /** Android's intent-filter match: the action (an intent without one passes any filter that lists one), then the data --
+     *  an intent with a URI needs a filter naming its scheme (and host, when the filter names hosts), one without needs a
+     *  filter without schemes. */
+    static boolean matches(Filter f, android.content.Intent i) {
+        String action = i.getAction();
+        if (action != null ? !f.actions.contains(action) : f.actions.isEmpty()) return false;
+        android.net.Uri d = i.getData();
+        if (d == null) return f.schemes.isEmpty() || i.getType() != null && !f.mimeTypes.isEmpty();
+        if (f.schemes.isEmpty() || !hasVal(f.schemes, d.getScheme())) return false;
+        if (!f.hosts.isEmpty()) {
+            String h = d.getHost();
+            boolean hit = false;
+            for (String fv : f.hosts) { String fh = val(fv); if (fh.equals(h) || "*".equals(fh) || (fh.startsWith("*") && h != null && h.endsWith(fh.substring(1)))) hit = true; }
+            if (!hit) return false;
+        }
+        return true;
+    }
     /** The activity an explicit or implicit intent would open in this app, or null. */
     public static Component resolve(android.content.Intent i) {
         read();
         android.content.ComponentName cn = i.getComponent();
         if (cn != null) { Component c = activity(cn.getClassName()); if (c != null) return c; for (Component a : activities) if (a.name.endsWith(cn.getClassName())) return a; return null; }
-        String action = i.getAction();
-        if (action == null) return null;
-        for (Component c : activities) for (Filter f : c.filters) {
-            if (!f.actions.contains(action)) continue;
-            if (i.getData() != null && !f.schemes.isEmpty() && !f.schemes.contains(i.getData().getScheme())) continue;
-            if (i.getData() != null && f.schemes.isEmpty()) continue;
-            return c;
-        }
+        for (Component c : activities) for (Filter f : c.filters) if (matches(f, i)) return c;
         return null;
     }
 }

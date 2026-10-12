@@ -5,6 +5,7 @@ import SwiftUI
 /// push a page of their own. What belongs to the app, what belongs to the emulator, and what the thing is.
 struct SettingsTab: View {
     @AppStorage(AppWindows.defaultKey) private var multitask = false
+    @AppStorage(CompatibilityStore.askKey) private var askCompat = true
 
     var body: some View {
         NavigationStack {
@@ -50,6 +51,34 @@ struct SettingsTab: View {
                     Text(LocalizedStringKey(L("Multitasking")))
                 } footer: {
                     Text(LocalizedStringKey(L("Apps and games open in a window you can move, resize and minimise to a dock, like LiveContainer's multitasking. Each app can override this in its own settings.")))
+                }
+
+                Section {
+                    Toggle(isOn: $askCompat) {
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Ask How Games Ran")
+                                Text("After playing, once per game per update").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        } icon: {
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(Color.green.gradient)
+                                .frame(width: 30, height: 30)
+                                .overlay {
+                                    Image(systemName: "list.bullet.clipboard")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundStyle(.white)
+                                }
+                        }
+                    }
+                    Link(destination: CompatibilityStore.site) {
+                        Label("Compatibility List", systemImage: "safari")
+                    }
+                } header: {
+                    Text("Compatibility")
+                } footer: {
+                    Text("Game pages and the Store show how each app runs for everyone, from antiweb.lol. Your reports go there "
+                       + "with your device, iOS version, Husk build and JIT method.")
                 }
 
                 Section(LocalizedStringKey(L("Emulator"))) {
@@ -633,6 +662,7 @@ struct AppearanceSettings: View {
     @State private var appIcon = HuskAppIcon.current
     @AppStorage(Theme.Appearance.key) private var appearance = Theme.Appearance.system
     @State private var language = HuskLanguage.choice
+    @AppStorage(Holiday.key) private var holiday = true
     @ObservedObject private var theme = AppTheme.shared
     @Environment(\.colorScheme) private var scheme
     @State private var custom: Color = AppTheme.shared.accentColor
@@ -658,6 +688,7 @@ struct AppearanceSettings: View {
                 .onChange(of: appearance) { v in
                     HuskLog.log("ui", "appearance: \(v.rawValue)")
                 }
+                Toggle("Holiday Decorations", isOn: $holiday)
             } header: {
                 Text(LocalizedStringKey(L("Theme")))
             } footer: {
@@ -781,6 +812,9 @@ struct AboutSettings: View {
                 if devInfo {
                     NavigationLink { TLChecksView() } label: {
                         Label(LocalizedStringKey(L("Device Checks")), systemImage: "stethoscope")
+                    }
+                    NavigationLink { MassTestView() } label: {
+                        Label("Mass Test", systemImage: "square.stack.3d.down.forward")
                     }
                 }
                 Button { showLogs = true } label: {

@@ -9,14 +9,11 @@ public abstract class LauncherActivity extends android.app.ListActivity {
     protected android.content.Intent intentForPosition(int p0) { return null; }
     protected android.app.LauncherActivity.ListItem itemForPosition(int p0) { return null; }
     public java.util.List makeListItems() { return new java.util.ArrayList(); }
-    public void onCreate(android.os.Bundle p0) {}
     protected boolean onEvaluateShowIcons() { return false; }
     public void onListItemClick(android.widget.ListView p0, android.view.View p1, int p2, long p3) {}
     protected java.util.List onQueryPackageManager(android.content.Intent p0) { return new java.util.ArrayList(); }
     protected void onSetContentView() {}
     protected void onSortResultList(java.util.List p0) {}
-    public void setTitle(int p0) { huskProps.put("Title", Integer.valueOf(p0)); }
-    public void setTitle(java.lang.CharSequence p0) { huskProps.put("Title", p0); }
     public static class IconResizer {
         private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
         public IconResizer(android.app.LauncherActivity p0) {}

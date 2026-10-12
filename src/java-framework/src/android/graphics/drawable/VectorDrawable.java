@@ -25,6 +25,7 @@ public class VectorDrawable extends Drawable {
     private final Group mRoot = new Group();
     private float mVw, mVh;
     private int mW, mH, mAlpha = 255;
+    private static final boolean TRACE = System.getenv("TL_VD_TRACE") != null;
     private ColorStateList mTint;
     private PorterDuff.Mode mTintMode = PorterDuff.Mode.SRC_IN;
     private ColorFilter mFilter;
@@ -56,6 +57,7 @@ public class VectorDrawable extends Drawable {
         ColorFilter cf = mFilter;
         if (cf == null && mTint != null) cf = new PorterDuffColorFilter(mTint.getColorForState(getState(), mTint.getDefaultColor()), mTintMode);
         mDrawFilter = cf;
+        if (TRACE) android.util.Log.d("VectorDrawable", "draw " + b + " vp " + mVw + "x" + mVh + " alpha " + mAlpha + " tint " + mTint + " mode " + mTintMode + " filter " + mFilter + " kids " + mRoot.kids.size() + " canvas " + c.getWidth() + "x" + c.getHeight());
         int save = c.save();
         c.translate(b.left, b.top);
         c.clipRect(0, 0, b.width(), b.height());

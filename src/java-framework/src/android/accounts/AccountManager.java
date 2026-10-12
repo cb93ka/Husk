@@ -100,8 +100,22 @@ public class AccountManager {
     public static final int VISIBILITY_VISIBLE = 1;
     public static void invalidateLocalAccountUserDataCaches() {}
     public static void invalidateLocalAccountsDataCaches() {}
-    public static android.content.Intent newChooseAccountIntent(android.accounts.Account p0, java.util.ArrayList p1, java.lang.String[] p2, boolean p3, java.lang.String p4, java.lang.String p5, java.lang.String[] p6, android.os.Bundle p7) { return null; }
-    public static android.content.Intent newChooseAccountIntent(android.accounts.Account p0, java.util.List p1, java.lang.String[] p2, java.lang.String p3, java.lang.String p4, java.lang.String[] p5, android.os.Bundle p6) { return null; }
+    /** The system account chooser's intent, as Android builds it (Husk has no accounts: started for a result, it comes back cancelled). */
+    public static android.content.Intent newChooseAccountIntent(android.accounts.Account selected, java.util.ArrayList allowable, java.lang.String[] types, boolean alwaysPrompt, java.lang.String description, java.lang.String authTokenType, java.lang.String[] features, android.os.Bundle options) {
+        return newChooseAccountIntent(selected, (java.util.List) allowable, types, description, authTokenType, features, options);
+    }
+    public static android.content.Intent newChooseAccountIntent(android.accounts.Account selected, java.util.List allowable, java.lang.String[] types, java.lang.String description, java.lang.String authTokenType, java.lang.String[] features, android.os.Bundle options) {
+        android.content.Intent i = new android.content.Intent();
+        i.setClassName("android", "android.accounts.ChooseTypeAndAccountActivity");
+        if (allowable != null) i.putParcelableArrayListExtra("allowableAccounts", new java.util.ArrayList<android.os.Parcelable>((java.util.List<android.os.Parcelable>) allowable));
+        i.putExtra("allowableAccountTypes", types);
+        i.putExtra("addAccountOptions", options);
+        i.putExtra("selectedAccount", selected);
+        i.putExtra("descriptionTextOverride", description);
+        i.putExtra("authTokenType", authTokenType);
+        i.putExtra("addAccountRequiredFeatures", features);
+        return i;
+    }
     public static android.os.Bundle sanitizeResult(android.os.Bundle p0) { return null; }
     public android.accounts.AccountManagerFuture addAccountAsUser(java.lang.String p0, java.lang.String p1, java.lang.String[] p2, android.os.Bundle p3, android.app.Activity p4, android.accounts.AccountManagerCallback p5, android.os.Handler p6, android.os.UserHandle p7) { return null; }
     public boolean addAccountExplicitly(android.accounts.Account p0, java.lang.String p1, android.os.Bundle p2) { return false; }

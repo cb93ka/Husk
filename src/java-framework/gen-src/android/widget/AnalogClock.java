@@ -18,13 +18,7 @@ public class AnalogClock extends android.view.View {
     public android.content.res.ColorStateList getSecondHandTintList() { return (android.content.res.ColorStateList) huskProps.get("SecondHandTintList"); }
     public java.lang.String getTimeZone() { return (java.lang.String) huskProps.get("TimeZone"); }
     protected java.time.Instant now() { return null; }
-    public void onAttachedToWindow() {}
-    public void onDetachedFromWindow() {}
-    public void onDraw(android.graphics.Canvas p0) {}
-    public void onMeasure(int p0, int p1) {}
-    public void onSizeChanged(int p0, int p1, int p2, int p3) {}
     protected void onTimeChanged() {}
-    public void onVisibilityAggregated(boolean p0) {}
     public void setClockEventDelegate(android.widget.TextClock.ClockEventDelegate p0) { huskProps.put("ClockEventDelegate", p0); }
     public void setDial(android.graphics.drawable.Icon p0) { huskProps.put("Dial", p0); }
     public void setDialTintBlendMode(android.graphics.BlendMode p0) { huskProps.put("DialTintBlendMode", p0); }

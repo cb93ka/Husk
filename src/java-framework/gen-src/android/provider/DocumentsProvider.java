@@ -5,10 +5,7 @@ package android.provider;
 public abstract class DocumentsProvider extends android.content.ContentProvider {
     private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
     public DocumentsProvider() { super(); }
-    public void attachInfo(android.content.Context p0, android.content.pm.ProviderInfo p1) {}
     public void attachInfoForTesting(android.content.Context p0, android.content.pm.ProviderInfo p1) {}
-    public android.os.Bundle call(java.lang.String p0, java.lang.String p1, android.os.Bundle p2) { return null; }
-    public android.net.Uri canonicalize(android.net.Uri p0) { return null; }
     public java.lang.String copyDocument(java.lang.String p0, java.lang.String p1) { return null; }
     public java.lang.String createDocument(java.lang.String p0, java.lang.String p1, java.lang.String p2) { return null; }
     public android.content.IntentSender createWebLinkIntent(java.lang.String p0, android.os.Bundle p1) { return null; }
@@ -19,24 +16,16 @@ public abstract class DocumentsProvider extends android.content.ContentProvider 
     public android.os.Bundle getDocumentMetadata(java.lang.String p0) { return null; }
     public java.lang.String[] getDocumentStreamTypes(java.lang.String p0, java.lang.String p1) { return null; }
     public java.lang.String getDocumentType(java.lang.String p0) { return null; }
-    public java.lang.String[] getStreamTypes(android.net.Uri p0, java.lang.String p1) { return null; }
     public java.lang.String getType(android.net.Uri p0) { return null; }
     public java.lang.String getTypeAnonymous(android.net.Uri p0) { return null; }
     public android.net.Uri insert(android.net.Uri p0, android.content.ContentValues p1) { return null; }
     public boolean isChildDocument(java.lang.String p0, java.lang.String p1) { return false; }
     public java.lang.String moveDocument(java.lang.String p0, java.lang.String p1, java.lang.String p2) { return null; }
-    public android.content.res.AssetFileDescriptor openAssetFile(android.net.Uri p0, java.lang.String p1) { return null; }
-    public android.content.res.AssetFileDescriptor openAssetFile(android.net.Uri p0, java.lang.String p1, android.os.CancellationSignal p2) { return null; }
     public abstract android.os.ParcelFileDescriptor openDocument(java.lang.String p0, java.lang.String p1, android.os.CancellationSignal p2);
     public android.content.res.AssetFileDescriptor openDocumentThumbnail(java.lang.String p0, android.graphics.Point p1, android.os.CancellationSignal p2) { return null; }
-    public android.os.ParcelFileDescriptor openFile(android.net.Uri p0, java.lang.String p1) { return null; }
-    public android.os.ParcelFileDescriptor openFile(android.net.Uri p0, java.lang.String p1, android.os.CancellationSignal p2) { return null; }
-    public android.content.res.AssetFileDescriptor openTypedAssetFile(android.net.Uri p0, java.lang.String p1, android.os.Bundle p2) { return null; }
     public android.content.res.AssetFileDescriptor openTypedAssetFile(android.net.Uri p0, java.lang.String p1, android.os.Bundle p2, android.os.CancellationSignal p3) { return null; }
     public android.content.res.AssetFileDescriptor openTypedDocument(java.lang.String p0, java.lang.String p1, android.os.Bundle p2, android.os.CancellationSignal p3) { return null; }
-    public android.database.Cursor query(android.net.Uri p0, java.lang.String[] p1, android.os.Bundle p2, android.os.CancellationSignal p3) { return null; }
     public android.database.Cursor query(android.net.Uri p0, java.lang.String[] p1, java.lang.String p2, java.lang.String[] p3, java.lang.String p4) { return null; }
-    public android.database.Cursor query(android.net.Uri p0, java.lang.String[] p1, java.lang.String p2, java.lang.String[] p3, java.lang.String p4, android.os.CancellationSignal p5) { return null; }
     public android.database.Cursor queryChildDocuments(java.lang.String p0, java.lang.String[] p1, android.os.Bundle p2) { return null; }
     public abstract android.database.Cursor queryChildDocuments(java.lang.String p0, java.lang.String[] p1, java.lang.String p2);
     public android.database.Cursor queryChildDocumentsForManage(java.lang.String p0, java.lang.String[] p1, java.lang.String p2) { return null; }

@@ -17,7 +17,6 @@ public class TvInteractiveAppView extends android.view.ViewGroup {
     public void clearOnUnhandledInputEventListener() {}
     public void createBiInteractiveApp(android.net.Uri p0, android.os.Bundle p1) {}
     public void destroyBiInteractiveApp(java.lang.String p0) {}
-    public boolean dispatchKeyEvent(android.view.KeyEvent p0) { return false; }
     public boolean dispatchUnhandledInputEvent(android.view.InputEvent p0) { return false; }
     public android.media.tv.interactive.TvInteractiveAppManager.Session getInteractiveAppSession() { return (android.media.tv.interactive.TvInteractiveAppManager.Session) huskProps.get("InteractiveAppSession"); }
     public android.media.tv.interactive.TvInteractiveAppView.OnUnhandledInputEventListener getOnUnhandledInputEventListener() { return (android.media.tv.interactive.TvInteractiveAppView.OnUnhandledInputEventListener) huskProps.get("OnUnhandledInputEventListener"); }
@@ -35,12 +34,8 @@ public class TvInteractiveAppView extends android.view.ViewGroup {
     public void notifyTimeShiftStatusChanged(java.lang.String p0, int p1) {}
     public void notifyTvMessage(int p0, android.os.Bundle p1) {}
     public void notifyVideoFreezeUpdated(boolean p0) {}
-    public void onAttachedToWindow() {}
-    public void onDetachedFromWindow() {}
     public void onLayout(boolean p0, int p1, int p2, int p3, int p4) {}
-    public void onMeasure(int p0, int p1) {}
     public boolean onUnhandledInputEvent(android.view.InputEvent p0) { return false; }
-    public void onVisibilityChanged(android.view.View p0, int p1) {}
     public void prepareInteractiveApp(java.lang.String p0, int p1) {}
     public void reset() {}
     public void resetInteractiveApp() {}

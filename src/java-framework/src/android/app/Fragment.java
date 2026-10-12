@@ -20,6 +20,7 @@ public class Fragment implements android.content.ComponentCallbacks2, View.OnCre
     ViewGroup mContainer;
     int mFragmentId, mContainerId;
     String mTag;
+    boolean mHuskActivityCreated;
     boolean mAdded, mRemoving, mDetached, mHidden, mResumed, mStarted, mInLayout, mRetainInstance, mHasMenu = false, mMenuVisible = true, mUserVisibleHint = true, mCalled;
     Fragment mTarget;
     int mTargetRequestCode;
@@ -64,7 +65,8 @@ public class Fragment implements android.content.ComponentCallbacks2, View.OnCre
     public void setMenuVisibility(boolean v) { mMenuVisible = v; }
     public void setUserVisibleHint(boolean v) { mUserVisibleHint = v; }
     public boolean getUserVisibleHint() { return mUserVisibleHint; }
-    public LoaderManager getLoaderManager() { return null; }
+    private LoaderManagerImpl mLoaders;
+    public LoaderManager getLoaderManager() { if (mLoaders == null) mLoaders = new LoaderManagerImpl(true); return mLoaders; }
     public void startActivity(Intent i) { mActivity.startActivity(i); }
     public void startActivity(Intent i, Bundle o) { mActivity.startActivity(i, o); }
     public void startActivityForResult(Intent i, int r) { mActivity.startActivityForResult(i, r); }

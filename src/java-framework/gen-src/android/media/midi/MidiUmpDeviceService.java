@@ -10,7 +10,6 @@ public abstract class MidiUmpDeviceService extends android.app.Service {
     public java.util.List getOutputPortReceivers() { return (huskProps.get("OutputPortReceivers") != null ? (java.util.List) huskProps.get("OutputPortReceivers") : new java.util.ArrayList()); }
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
     public void onClose() {}
-    public void onCreate() {}
     public void onDeviceStatusChanged(android.media.midi.MidiDeviceStatus p0) {}
     public abstract java.util.List onGetInputPortReceivers();
 }

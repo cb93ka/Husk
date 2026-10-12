@@ -51,8 +51,12 @@ public class Canvas {
     public int save() { return mNative == 0 ? 1 : husk.Gfx.cvSave(mNative); }
     public int save(int flags) { return save(); }
     public int saveLayer(RectF b, Paint p, int flags) { return saveLayer(b, p); }
-    public int saveLayer(RectF b, Paint p) { return b == null ? saveLayerAlpha(0, 0, 0, 0, p == null ? 255 : p.getAlpha()) : saveLayerAlpha(b.left, b.top, b.right, b.bottom, p == null ? 255 : p.getAlpha()); }
-    public int saveLayer(float l, float t, float r, float b, Paint p, int flags) { return saveLayerAlpha(l, t, r, b, p == null ? 255 : p.getAlpha()); }
+    public int saveLayer(RectF b, Paint p) { return b == null ? saveLayer(0, 0, 0, 0, p) : saveLayer(b.left, b.top, b.right, b.bottom, p); }
+    /* the layer is composited with the paint's alpha and blend mode (Lottie's mattes and masks restore with DST_IN / DST_OUT) */
+    public int saveLayer(float l, float t, float r, float b, Paint p, int flags) {
+        if (mNative == 0) return 1;
+        return husk.Gfx.cvSaveLayerMode(mNative, l, t, r, b, p == null ? 255 : p.getAlpha(), p == null ? 3 : p.huskXfer());
+    }
     public int saveLayer(float l, float t, float r, float b, Paint p) { return saveLayer(l, t, r, b, p, ALL_SAVE_FLAG); }
     public int saveLayerAlpha(RectF b, int alpha, int flags) { return saveLayerAlpha(b, alpha); }
     public int saveLayerAlpha(RectF b, int alpha) { return b == null ? saveLayerAlpha(0, 0, 0, 0, alpha) : saveLayerAlpha(b.left, b.top, b.right, b.bottom, alpha); }

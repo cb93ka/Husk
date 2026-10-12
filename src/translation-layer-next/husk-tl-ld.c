@@ -169,6 +169,15 @@ int tl_ld_apk_libs(void (*cb)(const char *name, uint64_t size, void *user), void
     return n;
 }
 
+/* The APK (base or split) whose lib/arm64-v8a/ carries a library, or NULL. */
+const char *tl_ld_lib_apk(const char *name)
+{
+    char entry[200];
+    snprintf(entry, sizeof(entry), "lib/arm64-v8a/%s", name);
+    for (int i = 0; i < G.napks; i++) if (tl_zip_find(&G.apks[i], entry)) return g_apk_paths[i];
+    return NULL;
+}
+
 bool tl_ld_has_lib(const char *name)
 {
     char path[160];
@@ -431,6 +440,21 @@ void *tl_ld_sym(tl_lib *lib, const char *name)
     return NULL;
 }
 
+/* dlsym(handle) as bionic's: the library, then what it needs, breadth-first (ART finds a dependency's JNI_OnLoad this way:
+ * Signal loads libringrtc, whose JNI_OnLoad is in the libringrtc_rffi it needs) */
+void *tl_ld_sym_deep(tl_lib *lib, const char *name, tl_lib **found_in)
+{
+    if (!lib) return NULL;
+    const elf_sym *s = lib_find(lib, name);
+    if (s) { if (found_in) *found_in = lib; return sym_value(lib, s); }
+    build_scope(lib);
+    for (int i = 0; i < lib->ndeps; i++) {
+        s = lib_find(lib->deps[i], name);
+        if (s) { if (found_in) *found_in = lib->deps[i]; return sym_value(lib->deps[i], s); }
+    }
+    return NULL;
+}
+
 /* Where the library's vaddr 0 lies in the executable view: what dladdr calls its base. */
 void *tl_ld_lib_base(const tl_lib *L) { return L ? (void *)(L->rx - L->base_vaddr) : NULL; }
 
@@ -465,6 +489,24 @@ const char *tl_ld_symbol_at(const void *addr, const char **lib_name, const void 
     if (!best) return NULL;
     if (sym_addr) *sym_addr = L->rx + (best->st_value - L->base_vaddr);
     return sym_name(L, best);
+}
+
+/* /proc/self/maps as the app's code sees it: each library it loaded, at its address, under the path it was loaded by (Unity and
+ * IL2CPP find their own library there; crash reporters list them). */
+size_t tl_ld_maps(char *buf, size_t n, const char *libdir)
+{
+    size_t k = 0;
+    if (n) buf[0] = 0;
+    pthread_mutex_lock(&G.lock);
+    for (int i = 0; i < G.nlibs && k + 200 < n; i++) {
+        tl_lib *L = G.libs[i];
+        if (L->state < 2) continue;
+        uintptr_t lo = (uintptr_t)L->rx, hi = lo + L->npages * PAGE;
+        k += (size_t)snprintf(buf + k, n - k, "%lx-%lx r-xp 00000000 fd:00 %d %s/%s\n", (unsigned long)lo, (unsigned long)hi, 4000 + i,
+                              libdir, L->soname[0] ? L->soname : base_name(L->name));
+    }
+    pthread_mutex_unlock(&G.lock);
+    return k;
 }
 
 int tl_ld_iterate(tl_ld_phdr_cb cb, void *user)
@@ -926,8 +968,35 @@ static int x18_rewrite(tl_lib *L, uint32_t *site_rw, const uint8_t *pc, ptrdiff_
         bool pair = (insn & 0x3A000000u) == 0x28000000u, single = (insn & 0x3B000000u) == 0x38000000u;
         unsigned mode = pair ? (insn >> 23) & 3u : (insn >> 10) & 3u;
         if ((pair || (single && !((insn >> 21) & 1u))) && ((insn >> 5) & 31u) == 31 && (mode == 1 || mode == 3)) {
-            tl_log_line("ld: %s: x18 instruction %08x at +%#llx writes back sp", L->name, insn, (unsigned long long)(pc - L->rx));
-            return X18_FAILED;
+            /* stp x17, x18, [sp, #-16]! / ldp x17, x18, [sp], #16 (a function that keeps x18 across a call): the stack pointer moves
+             * on its own (before the access for pre-index, after it for post-index) and the access becomes one at [sp] that does not
+             * write back, which is rewritten as any other; its scratch saves go below sp, clear of the access. */
+            int64_t moved;
+            uint32_t plain;
+            if (pair) {
+                int64_t imm7 = (int64_t)((insn >> 15) & 0x7Fu); if (imm7 & 0x40) imm7 -= 0x80;
+                unsigned opc = insn >> 30;
+                moved = imm7 * (opc == 2 ? 8 : 4);
+                plain = (insn & ~((3u << 23) | (0x7Fu << 15))) | (2u << 23);             /* signed offset 0 */
+            } else {
+                int64_t imm9 = (int64_t)((insn >> 12) & 0x1FFu); if (imm9 & 0x100) imm9 -= 0x200;
+                moved = imm9;
+                plain = insn & ~((3u << 10) | (0x1FFu << 12));                            /* unscaled offset 0 (stur / ldur) */
+            }
+            if (moved <= -4096 || moved >= 4096 || moved == 0) return X18_FAILED;
+            uint32_t adjust = moved < 0 ? 0xD10003FFu | ((uint32_t)(-moved) << 10) : 0x910003FFu | ((uint32_t)moved << 10);   /* sub / add sp, sp, #n */
+            uint32_t pused = a64_gpr_mask(plain);
+            unsigned S = pick_scratch(pused, 0), T = pick_scratch(pused, S);
+            if (!S || !T) return X18_FAILED;
+            if (mode == 3) EMIT(adjust);
+            EMIT(e_stur(S, -16)); EMIT(e_stur(T, -8));
+            EMIT(e_mrs_tsd(S)); EMIT(e_and_tsd(S)); EMIT(e_ldr_slot(S, S));
+            EMIT(a64_subst_gpr(plain, 18, S));
+            EMIT(e_mrs_tsd(T)); EMIT(e_and_tsd(T)); EMIT(e_str_slot(S, T));
+            EMIT(e_ldur(T, -8)); EMIT(e_ldur(S, -16));
+            if (mode == 1) EMIT(adjust);
+            EMIT_B(back);
+            goto emitted;
         }
         unsigned S = pick_scratch(used, 0), T = pick_scratch(used, S);
         if (!S || !T) return X18_FAILED;
@@ -938,6 +1007,7 @@ static int x18_rewrite(tl_lib *L, uint32_t *site_rw, const uint8_t *pc, ptrdiff_
         EMIT(e_ldur(T, -8)); EMIT(e_ldur(S, -16));
         EMIT_B(back);
     }
+emitted:
 #undef EMIT
 #undef EMIT_B
     if (!in_range_b(pc, rx)) return X18_FAILED;
@@ -1856,9 +1926,13 @@ static bool relocate(tl_lib *L)
 }
 
 /* Folders a library named only by its file name is also looked for in (the Java runtime's: the ART APEX's lib64). */
-static char *g_search[8];
+static char *g_search[32];
 static int g_nsearch;
-void tl_ld_add_search_dir(const char *dir) { if (g_nsearch < 8) g_search[g_nsearch++] = strdup(dir); }
+void tl_ld_add_search_dir(const char *dir)
+{
+    for (int i = 0; i < g_nsearch; i++) if (!strcmp(g_search[i], dir)) return;
+    if (g_nsearch < 32) g_search[g_nsearch++] = strdup(dir);
+}
 
 static tl_lib *load_locked(const char *name, int depth)
 {
@@ -1868,7 +1942,13 @@ static tl_lib *load_locked(const char *name, int depth)
     if (depth > 32) { tl_log_line("ld: dependency chain too deep at %s", name); return NULL; }
 
     uint8_t *file; size_t flen;
-    bool got = fetch_from_apks(base_name(name), &file, &flen) || fetch_from_file(name, &file, &flen);
+    bool got = fetch_from_apks(base_name(name), &file, &flen);
+    if (!got && fetch_from_file(name, &file, &flen)) {
+        got = true;
+        /* a library the app unpacked itself (SoLoader's Superpack, an update): what it needs is next to it */
+        char dir[1024]; snprintf(dir, sizeof(dir), "%s", name);
+        char *sl = strrchr(dir, '/'); if (sl && sl != dir) { *sl = 0; tl_ld_add_search_dir(dir); }
+    }
     for (int d = 0; !got && d < g_nsearch; d++) {
         char path[1024];
         snprintf(path, sizeof(path), "%s/%s", g_search[d], base_name(name));

@@ -356,9 +356,9 @@ public class WifiManager {
     public void clearWifiConnectedNetworkScorer() {}
     public void connect(int p0, android.net.wifi.WifiManager.ActionListener p1) {}
     public void connect(android.net.wifi.WifiConfiguration p0, android.net.wifi.WifiManager.ActionListener p1) {}
-    public android.net.wifi.WifiManager.MulticastLock createMulticastLock(java.lang.String p0) { return null; }
-    public android.net.wifi.WifiManager.WifiLock createWifiLock(int p0, java.lang.String p1) { return null; }
-    public android.net.wifi.WifiManager.WifiLock createWifiLock(java.lang.String p0) { return null; }
+    public android.net.wifi.WifiManager.MulticastLock createMulticastLock(java.lang.String p0) { return new MulticastLock(); }
+    public android.net.wifi.WifiManager.WifiLock createWifiLock(int p0, java.lang.String p1) { return new WifiLock(); }
+    public android.net.wifi.WifiManager.WifiLock createWifiLock(java.lang.String p0) { return new WifiLock(); }
     public void disable(int p0, android.net.wifi.WifiManager.ActionListener p1) {}
     public void disableEphemeralNetwork(java.lang.String p0) {}
     public void disableMscs() {}
@@ -701,11 +701,13 @@ public class WifiManager {
     }
     public static class MulticastLock {
         private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
-        public void acquire() {}
+        /* nothing to hold the radio awake for here: counted, as the platform's, so isHeld answers */
+        private int count; private boolean counted = true;
+        public synchronized void acquire() { count = counted ? count + 1 : 1; }
         protected void finalize() {}
-        public boolean isHeld() { return (huskProps.get("Held") instanceof Boolean ? (Boolean) huskProps.get("Held") : false); }
-        public void release() {}
-        public void setReferenceCounted(boolean p0) { huskProps.put("ReferenceCounted", Boolean.valueOf(p0)); }
+        public synchronized boolean isHeld() { return count > 0; }
+        public synchronized void release() { if (count > 0) count = counted ? count - 1 : 0; else if (counted) throw new RuntimeException("MulticastLock under-locked"); }
+        public synchronized void setReferenceCounted(boolean p0) { counted = p0; }
         protected MulticastLock() {}
     }
     public interface NetworkRequestMatchCallback {
@@ -818,11 +820,13 @@ public class WifiManager {
     }
     public static class WifiLock {
         private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
-        public void acquire() {}
+        /* nothing to hold the radio awake for here: counted, as the platform's, so isHeld answers */
+        private int count; private boolean counted = true;
+        public synchronized void acquire() { count = counted ? count + 1 : 1; }
         protected void finalize() {}
-        public boolean isHeld() { return (huskProps.get("Held") instanceof Boolean ? (Boolean) huskProps.get("Held") : false); }
-        public void release() {}
-        public void setReferenceCounted(boolean p0) { huskProps.put("ReferenceCounted", Boolean.valueOf(p0)); }
+        public synchronized boolean isHeld() { return count > 0; }
+        public synchronized void release() { if (count > 0) count = counted ? count - 1 : 0; else if (counted) throw new RuntimeException("WifiLock under-locked"); }
+        public synchronized void setReferenceCounted(boolean p0) { counted = p0; }
         public void setWorkSource(android.os.WorkSource p0) { huskProps.put("WorkSource", p0); }
         protected WifiLock() {}
     }

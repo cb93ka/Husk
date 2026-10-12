@@ -29,13 +29,47 @@ public class FragmentManager {
         public void onFragmentViewDestroyed(android.app.FragmentManager p0, android.app.Fragment p1) {}
         // ---- end of generated members (FragmentLifecycleCallbacks)
     }
+    /* the host activity's state, which no fragment goes past (onActivityCreated comes after the activity's onCreate, onStart
+       after its onStart...): androidx's ReportFragment would otherwise move a ComponentActivity's lifecycle inside its onCreate */
+    static final int HOST_NONE = 0, HOST_CREATED = 1, HOST_ACTIVITY_CREATED = 2, HOST_STARTED = 3, HOST_RESUMED = 4;
+    private int mHostState;
+    private final ArrayList<Tx> mPending = new ArrayList<>();
+    private boolean mExecScheduled;
     private final Activity mActivity;
     final ArrayList<Fragment> mAdded = new ArrayList<>();
     final ArrayList<Tx> mBackStack = new ArrayList<>();
     private final ArrayList<OnBackStackChangedListener> mListeners = new ArrayList<>();
-    FragmentManager(Activity a) { mActivity = a; }
+    FragmentManager(Activity a) { mActivity = a; mHostState = a.huskFragmentHost(); }
+    /** The activity moved: its fragments follow, up to where it is now (or down, as it pauses, stops, goes). */
+    void huskHostState(int state) {
+        int old = mHostState;
+        mHostState = state;
+        if (state > old) {
+            executePendingTransactions();
+            for (Fragment f : new ArrayList<>(mAdded)) raise(f);
+        } else if (state < old) {
+            for (Fragment f : new ArrayList<>(mAdded)) {
+                if (state < HOST_RESUMED && f.mResumed) { f.onPause(); f.mResumed = false; }
+                if (state < HOST_STARTED && f.mStarted) { f.onStop(); f.mStarted = false; }
+            }
+            if (state == HOST_NONE) for (Fragment f : new ArrayList<>(mAdded)) {
+                if (f.mView != null) { f.onDestroyView(); f.mView = null; }
+                f.onDestroy(); f.onDetach();
+            }
+        }
+    }
+    /** A fragment brought up to the host's state. */
+    private void raise(Fragment f) {
+        if (mHostState >= HOST_ACTIVITY_CREATED && !f.mHuskActivityCreated) { f.mHuskActivityCreated = true; f.onActivityCreated(null); f.onViewStateRestored(null); }
+        if (mHostState >= HOST_STARTED && !f.mStarted) { f.onStart(); f.mStarted = true; }
+        if (mHostState >= HOST_RESUMED && !f.mResumed) { f.onResume(); f.mResumed = true; }
+    }
     public FragmentTransaction beginTransaction() { return new Tx(); }
-    public boolean executePendingTransactions() { return false; }
+    public boolean executePendingTransactions() {
+        boolean did = false;
+        while (!mPending.isEmpty()) { Tx t = mPending.remove(0); t.apply(); did = true; }
+        return did;
+    }
     public Fragment findFragmentById(int id) { for (int i = mAdded.size() - 1; i >= 0; i--) { Fragment f = mAdded.get(i); if (f.mFragmentId == id || f.mContainerId == id) return f; } return null; }
     public Fragment findFragmentByTag(String tag) { if (tag != null) for (int i = mAdded.size() - 1; i >= 0; i--) if (tag.equals(mAdded.get(i).mTag)) return mAdded.get(i); return null; }
     public java.util.List<Fragment> getFragments() { return new ArrayList<>(mAdded); }
@@ -90,10 +124,7 @@ public class FragmentManager {
             f.onViewCreated(v, null);
             if (f.mHidden) v.setVisibility(View.GONE);
         }
-        f.onActivityCreated(null);
-        f.onViewStateRestored(null);
-        f.onStart(); f.mStarted = true;
-        if (mActivity.isResumed()) { f.onResume(); f.mResumed = true; }
+        raise(f);
     }
     void removeFragment(Fragment f) {
         if (!mAdded.remove(f)) return;
@@ -102,7 +133,7 @@ public class FragmentManager {
         if (f.mStarted) { f.onStop(); f.mStarted = false; }
         if (f.mView != null) { f.onDestroyView(); if (f.mView.getParent() instanceof ViewGroup) ((ViewGroup) f.mView.getParent()).removeView(f.mView); f.mView = null; }
         f.onDestroy(); f.onDetach();
-        f.mAdded = false;
+        f.mAdded = false; f.mHuskActivityCreated = false;
     }
     /** A <fragment class=... android:id=...> in a layout. */
     public View huskInflateFragment(View parent, Context c, android.util.AttributeSet attrs) {
@@ -124,7 +155,7 @@ public class FragmentManager {
         f.mView = v;
         f.onViewCreated(v, null);
         final Fragment ff = f;
-        mActivity.runOnUiThread(() -> { ff.onActivityCreated(null); ff.onStart(); ff.mStarted = true; if (mActivity.isResumed()) { ff.onResume(); ff.mResumed = true; } });
+        raise(ff);
         return v;
     }
 
@@ -156,7 +187,12 @@ public class FragmentManager {
         public FragmentTransaction setBreadCrumbTitle(int r) { return this; } public FragmentTransaction setBreadCrumbTitle(CharSequence t) { return this; }
         public FragmentTransaction setBreadCrumbShortTitle(int r) { return this; } public FragmentTransaction setBreadCrumbShortTitle(CharSequence t) { return this; }
         public FragmentTransaction runOnCommit(Runnable r) { ops.add(new Object[] { 9, null, 0, null, r }); return this; }
-        public int commit() { mActivity.runOnUiThread(this::apply); return 0; }
+        /* as Android: on the main thread's next turn (or when the activity moves, or executePendingTransactions) */
+        public int commit() {
+            mPending.add(this);
+            if (!mExecScheduled) { mExecScheduled = true; new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> { mExecScheduled = false; executePendingTransactions(); }); }
+            return 0;
+        }
         public int commitAllowingStateLoss() { return commit(); }
         public void commitNow() { apply(); }
         public void commitNowAllowingStateLoss() { apply(); }

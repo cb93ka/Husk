@@ -97,6 +97,7 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
         setFocusableInTouchMode(true);
         synchronized (sViews) { mId = sNextId++; sViews.put(mId, this); }
         mSettings = new HuskWebSettings(this::settingsChanged);
+        husk.Web.ensureApp();
         husk.Web.create(mId);
         pushSettings();
     }
@@ -124,8 +125,8 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
     public static android.content.pm.PackageInfo getCurrentWebViewPackage() {
         android.content.pm.PackageInfo p = new android.content.pm.PackageInfo();
         p.packageName = "com.google.android.webview";
-        p.versionName = "124.0.6367.179";
-        p.versionCode = 636717900;
+        p.versionName = "140.0.7339.207";
+        p.versionCode = 733920700;
         p.applicationInfo = new android.content.pm.ApplicationInfo();
         p.applicationInfo.packageName = p.packageName;
         p.applicationInfo.enabled = true;
@@ -163,11 +164,14 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
     @Override public void setBackgroundColor(int color) { if (!mDestroyed) husk.Web.background(mId, color); }
 
     // ---- loading
-    public void loadUrl(String url) { loadUrl(url, null); }
-    public void loadUrl(String url, Map<String, String> additionalHttpHeaders) {
+    /* both overloads go to one private implementation, as Android's provider does: an app's subclass overriding one of them and
+       calling super from it (Amazon's MASHWebView) would otherwise come back to itself */
+    public void loadUrl(String url) { load(url, null); }
+    public void loadUrl(String url, Map<String, String> additionalHttpHeaders) { load(url, additionalHttpHeaders); }
+    private void load(String url, Map<String, String> additionalHttpHeaders) {
         if (mDestroyed || url == null) return;
         Log.d(TAG, "loadUrl " + url);
-        if (url.startsWith("javascript:")) { evaluateJavascript(Uri.decode(url.substring(11)), null); return; }
+        if (url.startsWith("javascript:")) { eval(Uri.decode(url.substring(11)), null); return; }
         url = normalize(url);
         if (mOriginalUrl == null) mOriginalUrl = url;
         mUrl = url;
@@ -183,9 +187,15 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
             // the app may serve this origin itself (shouldInterceptRequest): ask before WebKit goes to the network
             sIo.execute(() -> {
                 WebResourceResponse r = intercept(target, "GET", true, additionalHttpHeaders);
-                Log.d(TAG, target + (r != null ? ": the app serves this origin" : ": from the network"));
+                Uri u = Uri.parse(target);
+                boolean virtual = r != null && !NETWORK_ONLY && virtualHost(u.getHost());
+                Log.d(TAG, target + (virtual ? ": the app serves this origin" : r != null ? ": the app also serves this public origin: from the network first" : ": from the network"));
                 synchronized (this) {
-                    if (r != null) { Uri u = Uri.parse(target); mLocalSchemes.put(u.getHost(), u.getScheme()); mPrimed.put(toHost(target), r); }
+                    // An origin only the app has (localhost, *.androidplatform.net, ...) loads through the huskapp scheme. A public one
+                    // the app also answers for (an offline cache: Notion) loads from the network, so the page keeps its https origin --
+                    // pages route by it -- unless the network does not have it (a made-up domain), and then through the app after all.
+                    if (virtual) { mLocalSchemes.put(u.getHost(), u.getScheme()); mPrimed.put(toHost(target), r); }
+                    else if (r != null && u.getHost() != null) mNetworkFirst.put(u.getHost().toLowerCase(java.util.Locale.ROOT), u.getScheme());
                 }
                 husk.Web.load(mId, toHost(target), headers, null);
             });
@@ -213,7 +223,8 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
         mUrl = historyUrl != null ? historyUrl : base != null ? base : "about:blank";
         husk.Web.loadData(mId, bytes, mimeType == null || mimeType.isEmpty() ? "text/html" : mimeType, "utf-8", base == null ? null : toHost(base));
     }
-    public void evaluateJavascript(String script, ValueCallback<String> resultCallback) {
+    public void evaluateJavascript(String script, ValueCallback<String> resultCallback) { eval(script, resultCallback); }
+    private void eval(String script, ValueCallback<String> resultCallback) {
         if (mDestroyed || script == null) return;
         int cb = 0;
         if (resultCallback != null) synchronized (mEvalCallbacks) { cb = mNextCallback++; mEvalCallbacks.put(cb, resultCallback); }
@@ -227,8 +238,8 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
     public void goForward() { if (!mDestroyed) husk.Web.go(mId, 1); }
     public boolean canGoBackOrForward(int steps) { return steps == 0 || (steps < 0 ? steps == -1 && mCanBack : steps == 1 && mCanForward); }
     public void goBackOrForward(int steps) { if (steps < 0) for (int i = 0; i < -steps; i++) goBack(); else for (int i = 0; i < steps; i++) goForward(); }
-    public boolean pageUp(boolean top) { evaluateJavascript(top ? "window.scrollTo(0,0)" : "window.scrollBy(0,-window.innerHeight/2)", null); return true; }
-    public boolean pageDown(boolean bottom) { evaluateJavascript(bottom ? "window.scrollTo(0,document.body.scrollHeight)" : "window.scrollBy(0,window.innerHeight/2)", null); return true; }
+    public boolean pageUp(boolean top) { eval(top ? "window.scrollTo(0,0)" : "window.scrollBy(0,-window.innerHeight/2)", null); return true; }
+    public boolean pageDown(boolean bottom) { eval(bottom ? "window.scrollTo(0,document.body.scrollHeight)" : "window.scrollBy(0,window.innerHeight/2)", null); return true; }
     public void clearHistory() { mHistory.clear(); }
     public void clearCache(boolean includeDiskFiles) {}
     public void clearFormData() {}
@@ -296,10 +307,22 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
     public android.view.textclassifier.TextClassifier getTextClassifier() { return null; }
     public Looper getWebViewLooper() { return Looper.getMainLooper(); }
     public void postVisualStateCallback(long requestId, VisualStateCallback callback) { mHandler.post(() -> callback.onComplete(requestId)); }
-    public WebMessagePort[] createWebMessageChannel() { return new WebMessagePort[0]; }
+    public WebMessagePort[] createWebMessageChannel() { return HuskWebMessagePort.channel(this); }
+    /** A 'message' event at the page's window; ports in the message become the page's MessagePorts (HuskWebMessagePort). */
     public void postWebMessage(WebMessage message, Uri targetOrigin) {
-        evaluateJavascript("window.dispatchEvent(new MessageEvent('message',{data:" + JSONObject.quote(message.getData()) + "}))", null);
+        StringBuilder ids = new StringBuilder();
+        WebMessagePort[] ports = message.getPorts();
+        if (ports != null) for (WebMessagePort p : ports) if (p instanceof HuskWebMessagePort) ids.append(ids.length() > 0 ? "," : "").append(((HuskWebMessagePort) p).transfer());
+        String data = message.getData() == null ? "null" : JSONObject.quote(message.getData());
+        eval("(function(){var ps=[],R=window.__huskPorts=window.__huskPorts||{};[" + ids + "].forEach(function(id){var c=new MessageChannel();R[id]=c.port1;"
+             + "c.port1.onmessage=function(e){window.__husk.call('\\u0001port',String(id),[e.data==null?null:String(e.data)])};ps.push(c.port2);});"
+             + "window.dispatchEvent(new MessageEvent('message',{data:" + data + ",origin:'',ports:ps}));})()", null);
     }
+    void huskPortToPage(int id, String data) {
+        eval("(function(){var p=(window.__huskPorts||{})[" + id + "];if(p)p.postMessage(" + (data == null ? "null" : JSONObject.quote(data)) + ")})()", null);
+    }
+    void huskPortClose(int id) { eval("(function(){var R=window.__huskPorts||{};if(R[" + id + "]){R[" + id + "].close();delete R[" + id + "]}})()", null); }
+    Handler huskHandler() { return mHandler; }
     public WebBackForwardList copyBackForwardList() {
         final String url = mUrl;
         return new WebBackForwardList() {
@@ -340,7 +363,7 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
     }
     public void removeJavascriptInterface(String name) {
         synchronized (mInterfaces) { mInterfaces.remove(name); }
-        evaluateJavascript("try{delete window[" + JSONObject.quote(name) + "]}catch(e){}", null);
+        eval("try{delete window[" + JSONObject.quote(name) + "]}catch(e){}", null);
     }
     private static boolean annotationsRequired() { return husk.Manifest.targetSdk >= 17; }
     private static Boolean sAnnotationsWork;
@@ -364,10 +387,80 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
         for (Method m : c.getMethods()) if (bridged(m) && seen.add(m.getName())) out.add(m.getName());
         return out;
     }
+    // ---- androidx.webkit's web message listeners and document-start scripts (HuskSupportLib serves the androidx side)
+    private final Map<String, Object[]> mMessageListeners = new LinkedHashMap<>();   // object name -> { origin rules, listener }
+    private final Map<Integer, String[]> mStartScripts = new HashMap<>();             // script id -> origin rules, while not removed
+    private static int sNextStartScript = 1;
+
+    /** window[name] in every page whose origin the rules allow: postMessage reaches the listener, replies reach onmessage and
+     *  'message' listeners. The page asks (synchronously, as it starts) whether the object is for it. */
+    void huskAddWebMessageListener(String name, String[] rules, java.lang.reflect.InvocationHandler listener) {
+        if (name == null || listener == null || mDestroyed) return;
+        synchronized (mMessageListeners) { mMessageListeners.put(name, new Object[] { rules, listener }); }
+        husk.Web.userScript(mId, "(function(){var n=" + JSONObject.quote(name) + ";if(!window.__husk||!window.__husk.call('\u0001wmlok',n,[location.href]))return;"
+            + "var ls=[],o={onmessage:null,"
+            + "postMessage:function(m){window.__husk.call('\u0001wml',n,[String(m),location.href,window===window.top]);},"
+            + "addEventListener:function(t,f){if(t==='message'&&typeof f==='function'&&ls.indexOf(f)<0)ls.push(f);},"
+            + "removeEventListener:function(t,f){var i=ls.indexOf(f);if(i>=0)ls.splice(i,1);},"
+            + "__deliver:function(d){var e={data:d,type:'message',target:o};"
+            + "if(typeof o.onmessage==='function'){try{o.onmessage(e)}catch(x){setTimeout(function(){throw x})}}"
+            + "ls.slice().forEach(function(f){try{f(e)}catch(x){setTimeout(function(){throw x})}});}};"
+            + "try{Object.defineProperty(window,n,{value:o,configurable:true,writable:true})}catch(e){window[n]=o}})();");
+    }
+    void huskRemoveWebMessageListener(String name) {
+        synchronized (mMessageListeners) { mMessageListeners.remove(name); }
+        eval("try{delete window[" + JSONObject.quote(name) + "]}catch(e){}", null);
+    }
+    /** A reply through a listener's JavaScriptReplyProxy: to the page's object of that name. */
+    void huskReplyMessage(String name, String data) {
+        eval("(function(){var o=window[" + JSONObject.quote(name) + "];if(o&&o.__deliver)o.__deliver(" + (data == null ? "null" : JSONObject.quote(data)) + ")})()", null);
+    }
+    /** Runs at the start of every page whose origin the rules allow, until removed. A page it is not for stops it with an error at
+     *  its first line, so its top-level declarations stay global where it does run. */
+    Runnable huskAddDocumentStartScript(String script, String[] rules) {
+        final int id;
+        synchronized (WebView.class) { id = sNextStartScript++; }
+        synchronized (mStartScripts) { mStartScripts.put(id, rules); }
+        husk.Web.userScript(mId, "if(!(window.__husk&&window.__husk.call('\u0001ds','" + id + "',[location.href])))throw new Error('husk: a document-start script not for this page');\n" + script);
+        return () -> { synchronized (mStartScripts) { mStartScripts.remove(id); } };
+    }
+    private String supportCall(String kind, String name, JSONArray a) {
+        switch (kind) {
+        case "\u0001wmlok": {
+            Object[] l; synchronized (mMessageListeners) { l = mMessageListeners.get(name); }
+            return "{\"v\":" + (l != null && HuskSupportLib.originAllowed((String[]) l[0], originOf(a.optString(0, "")))) + "}";
+        }
+        case "\u0001ds": {
+            String[] rules; synchronized (mStartScripts) { rules = mStartScripts.get(Integer.valueOf(name)); }
+            return "{\"v\":" + (rules != null && HuskSupportLib.originAllowed(rules, originOf(a.optString(0, "")))) + "}";
+        }
+        case "\u0001port": HuskWebMessagePort.fromPage(Integer.parseInt(name), a.isNull(0) ? null : a.optString(0)); return "{}";
+        case "\u0001wml": {
+            Object[] l; synchronized (mMessageListeners) { l = mMessageListeners.get(name); }
+            if (l == null) return "{}";
+            final String data = a.optString(0, "");
+            final Uri origin = originOf(a.optString(1, ""));
+            final boolean main = a.optBoolean(2, true);
+            final java.lang.reflect.InvocationHandler listener = (java.lang.reflect.InvocationHandler) l[1];
+            mHandler.post(() -> { if (!mDestroyed) HuskSupportLib.deliver(this, name, listener, data, origin, main); });
+            return "{}";
+        }
+        }
+        return "{}";
+    }
+    /** scheme://host[:port] of a page, as the app knows the page's address. */
+    private Uri originOf(String href) {
+        Uri u = Uri.parse(fromHost(href));
+        if (u.getScheme() == null || u.getHost() == null) return u;
+        return Uri.parse(u.getScheme() + "://" + u.getHost() + (u.getPort() >= 0 ? ":" + u.getPort() : ""));
+    }
+
     private void bridgeCall(int call, String json) {
         String result;
         try {
             JSONObject req = new JSONObject(json);
+            String kind = req.getString("o");
+            if (kind.startsWith("\u0001")) { husk.Web.reply(call, supportCall(kind, req.getString("m"), req.optJSONArray("a") != null ? req.optJSONArray("a") : new JSONArray())); return; }
             Object target;
             synchronized (mInterfaces) { target = mInterfaces.get(req.getString("o")); }
             String name = req.getString("m");
@@ -420,6 +513,15 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
         return end < url.length() && url.charAt(end) == '/' ? url : url.substring(0, end) + "/" + url.substring(end);
     }
     private static boolean isHttp(String url) { return url.regionMatches(true, 0, "http://", 0, 7) || url.regionMatches(true, 0, "https://", 0, 8); }
+    private final Map<String, String> mNetworkFirst = new HashMap<>();   // public hosts the app also serves, until the network shows it has them
+    /** A host only the device can mean: localhost, an IP address, a name without dots, Android's appassets domain, .local. */
+    private static boolean virtualHost(String h) {
+        if (h == null || h.isEmpty()) return true;
+        h = h.toLowerCase(java.util.Locale.ROOT);
+        if (h.equals("localhost") || h.endsWith(".localhost") || h.indexOf('.') < 0 || h.indexOf(':') >= 0) return true;
+        if (h.endsWith(".androidplatform.net") || h.endsWith(".local") || h.endsWith(".internal") || h.endsWith(".test") || h.endsWith(".invalid")) return true;
+        return h.matches("[0-9.]+");
+    }
     private synchronized boolean isLocal(String url) {
         Uri u = Uri.parse(url);
         String s = mLocalSchemes.get(u.getHost());
@@ -525,6 +627,7 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
         case "m": mClient.onPageCommitVisible(this, fromHost(f[2])); mClient.doUpdateVisitedHistory(this, fromHost(f[2]), false); break;
         case "f": {
             String url = fromHost(f[2]);
+            { Uri fu = Uri.parse(url); if (fu.getHost() != null) synchronized (this) { mNetworkFirst.remove(fu.getHost().toLowerCase(java.util.Locale.ROOT)); } }
             if (!url.isEmpty()) mUrl = url;
             mProgress = 100;
             if (mChrome != null) mChrome.onProgressChanged(this, 100);
@@ -541,6 +644,17 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
         }
         case "h": mCanBack = "1".equals(f[2]); mCanForward = "1".equals(f[3]); if (!f[4].isEmpty()) mUrl = fromHost(f[4]); break;
         case "E": {
+            String failed = fromHost(f[4]);
+            Uri fu = Uri.parse(failed);
+            String fh = fu.getHost() == null ? null : fu.getHost().toLowerCase(java.util.Locale.ROOT);
+            synchronized (this) {
+                if (fh != null && mNetworkFirst.remove(fh) != null) {
+                    Log.d(TAG, failed + ": not on the network: the app serves it");
+                    mLocalSchemes.put(fu.getHost(), fu.getScheme());
+                    husk.Web.load(mId, toHost(failed), null, null);
+                    break;
+                }
+            }
             final int code = errorCode(Integer.parseInt(f[2]));
             final String desc = f[3];
             mClient.onReceivedError(this, request(fromHost(f[4]), "GET", true, false, null), new WebResourceError() {
@@ -608,11 +722,15 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
         if (!override && !web) Log.w(TAG, "nothing handles " + url);
         husk.Web.reply(call, override || !web ? "\u0001nav-cancel" : "\u0001nav-allow");
     }
+    /** TL_WEB_CONSOLE: every console message in the log, also those the app's chrome client takes (debugging a page that fails quietly) */
+    private static final boolean CONSOLE_ALL = System.getenv("TL_WEB_CONSOLE") != null;
+    /** TL_WEB_NETWORK: http(s) pages always from the network, never an origin the app serves (comparing the two) */
+    private static final boolean NETWORK_ONLY = System.getenv("TL_WEB_NETWORK") != null;
     private void console(int level, String message, String source, int line) {
         ConsoleMessage.MessageLevel l = level == 4 ? ConsoleMessage.MessageLevel.ERROR : level == 3 ? ConsoleMessage.MessageLevel.WARNING
                                       : level == 1 ? ConsoleMessage.MessageLevel.DEBUG : level == 2 ? ConsoleMessage.MessageLevel.LOG : ConsoleMessage.MessageLevel.LOG;
         boolean handled = mChrome != null && mChrome.onConsoleMessage(new ConsoleMessage(message, fromHost(source), line, l));
-        if (!handled) Log.println(level >= 4 ? Log.ERROR : level == 3 ? Log.WARN : Log.INFO, "chromium", "[INFO:CONSOLE(" + line + ")] \"" + message + "\", source: " + fromHost(source) + " (" + line + ")");
+        if (!handled || CONSOLE_ALL) Log.println(level >= 4 ? Log.ERROR : level == 3 ? Log.WARN : Log.INFO, "chromium", "[INFO:CONSOLE(" + line + ")] \"" + message + "\", source: " + fromHost(source) + " (" + line + ")");
     }
     private void dialog(String kind, int call, String url, String message, String def) {
         final boolean[] answered = new boolean[1];
@@ -718,6 +836,28 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
         public int getType() { return mType; }
         public String getExtra() { return mExtra; }
     }
+    // ---- generated by tools/compat/fillmembers.py: the platform's members this class does not write (signatures only)
+    public void debugDump() {}
+    public void dispatchCreateViewTranslationRequest(java.util.Map p0, int[] p1, android.view.translation.TranslationCapability p2, java.util.List p3) {}
+    public void dumpViewHierarchyWithProperties(java.io.BufferedWriter p0, int p1) {}
+    public void emulateShiftHeld() {}
+    protected void encodeProperties(android.view.ViewHierarchyEncoder p0) {}
+    public android.view.View findHierarchyView(java.lang.String p0, int p1) { return null; }
+    public boolean isVisibleToUserForAutofill(int p0) { return false; }
+    public void onActivityResult(int p0, int p1, android.content.Intent p2) {}
+    public void onCreateVirtualViewTranslationRequests(long[] p0, int[] p1, java.util.function.Consumer p2) {}
+    protected void onDetachedFromWindowInternal() {}
+    protected void onDrawVerticalScrollBar(android.graphics.Canvas p0, android.graphics.drawable.Drawable p1, int p2, int p3, int p4, int p5) {}
+    public void onInitializeAccessibilityEventInternal(android.view.accessibility.AccessibilityEvent p0) {}
+    public void onInitializeAccessibilityNodeInfoInternal(android.view.accessibility.AccessibilityNodeInfo p0) {}
+    public void onMovedToDisplay(int p0, android.content.res.Configuration p1) {}
+    public void onProvideAutofillVirtualStructure(android.view.ViewStructure p0, int p1) {}
+    public void onProvideContentCaptureStructure(android.view.ViewStructure p0, int p1) {}
+    public void onProvideVirtualStructure(android.view.ViewStructure p0) {}
+    public void onVirtualViewTranslationResponses(android.util.LongSparseArray p0) {}
+    public boolean performAccessibilityActionInternal(int p0, android.os.Bundle p1) { return false; }
+    public void refreshPlugins(boolean p0) {}
+    // ---- end of generated members
     // ---- generated by tools/compat/genstubs.py: the platform's nested classes this class does not write
     public static final class InspectionCompanion implements android.view.inspector.InspectionCompanion {
         private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
@@ -756,26 +896,4 @@ public class WebView extends AbsoluteLayout implements android.view.ViewTreeObse
         PrivateAccess() { this((android.webkit.WebView) null); }
     }
     // ---- end of generated nested classes
-    // ---- generated by tools/compat/fillmembers.py: the platform's members this class does not write (signatures only)
-    public void debugDump() {}
-    public void dispatchCreateViewTranslationRequest(java.util.Map p0, int[] p1, android.view.translation.TranslationCapability p2, java.util.List p3) {}
-    public void dumpViewHierarchyWithProperties(java.io.BufferedWriter p0, int p1) {}
-    public void emulateShiftHeld() {}
-    protected void encodeProperties(android.view.ViewHierarchyEncoder p0) {}
-    public android.view.View findHierarchyView(java.lang.String p0, int p1) { return null; }
-    public boolean isVisibleToUserForAutofill(int p0) { return false; }
-    public void onActivityResult(int p0, int p1, android.content.Intent p2) {}
-    public void onCreateVirtualViewTranslationRequests(long[] p0, int[] p1, java.util.function.Consumer p2) {}
-    protected void onDetachedFromWindowInternal() {}
-    protected void onDrawVerticalScrollBar(android.graphics.Canvas p0, android.graphics.drawable.Drawable p1, int p2, int p3, int p4, int p5) {}
-    public void onInitializeAccessibilityEventInternal(android.view.accessibility.AccessibilityEvent p0) {}
-    public void onInitializeAccessibilityNodeInfoInternal(android.view.accessibility.AccessibilityNodeInfo p0) {}
-    public void onMovedToDisplay(int p0, android.content.res.Configuration p1) {}
-    public void onProvideAutofillVirtualStructure(android.view.ViewStructure p0, int p1) {}
-    public void onProvideContentCaptureStructure(android.view.ViewStructure p0, int p1) {}
-    public void onProvideVirtualStructure(android.view.ViewStructure p0) {}
-    public void onVirtualViewTranslationResponses(android.util.LongSparseArray p0) {}
-    public boolean performAccessibilityActionInternal(int p0, android.os.Bundle p1) { return false; }
-    public void refreshPlugins(boolean p0) {}
-    // ---- end of generated members
 }

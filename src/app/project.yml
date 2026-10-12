@@ -103,6 +103,15 @@ targets:
           # WebKit draws Java apps' android.webkit.WebView (WKWebView under the app's screen).
           - "-framework"
           - "WebKit"
+          # VideoToolbox (with CoreMedia and CoreVideo) decodes H.264/HEVC for Java apps' MediaCodec; Accelerate converts the frames.
+          - "-framework"
+          - "VideoToolbox"
+          - "-framework"
+          - "CoreMedia"
+          - "-framework"
+          - "CoreVideo"
+          - "-framework"
+          - "Accelerate"
           # Security verifies the licence signature Minecraft's UI engine checks through Java's Signature class.
           - "-framework"
           - "Security"
@@ -205,6 +214,9 @@ targets:
           else
             echo "warning: build/java-runtime missing (scripts/build_java_runtime.sh): Java apps will not start" >&2
           fi
+        # Every build: the Java runtime it copies changes without Xcode knowing (it has outputs and no inputs, so dependency
+        # analysis skipped it once they existed, and IPAs shipped a day-old runtime).
+        basedOnDependencyAnalysis: false
         outputFiles:
           - "$(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/vmlinuz-virt"
           - "$(BUILT_PRODUCTS_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/initramfs-virt"

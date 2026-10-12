@@ -10,7 +10,6 @@ public class BassBoost extends android.media.audiofx.AudioEffect {
     public android.media.audiofx.BassBoost.Settings getProperties() { return (android.media.audiofx.BassBoost.Settings) huskProps.get("Properties"); }
     public short getRoundedStrength() { return (huskProps.get("RoundedStrength") instanceof Short ? (Short) huskProps.get("RoundedStrength") : (short) 0); }
     public boolean getStrengthSupported() { return (huskProps.get("StrengthSupported") instanceof Boolean ? (Boolean) huskProps.get("StrengthSupported") : false); }
-    public void setParameterListener(android.media.audiofx.BassBoost.OnParameterChangeListener p0) { huskProps.put("ParameterListener", p0); }
     public void setProperties(android.media.audiofx.BassBoost.Settings p0) { huskProps.put("Properties", p0); }
     public void setStrength(short p0) { huskProps.put("Strength", Short.valueOf(p0)); }
     BassBoost() { this((int) 0, (int) 0); }

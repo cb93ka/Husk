@@ -10,5 +10,4 @@ public abstract class CameraPrewarmService extends android.app.Service {
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
     public abstract void onCooldown(boolean p0);
     public abstract void onPrewarm();
-    public boolean onUnbind(android.content.Intent p0) { return false; }
 }

@@ -13,6 +13,5 @@ public abstract class IsolatedService extends android.app.Service {
     public android.adservices.ondevicepersonalization.KeyValueStore getRemoteData(android.adservices.ondevicepersonalization.RequestToken p0) { return null; }
     public android.adservices.ondevicepersonalization.UserData getUserData(android.adservices.ondevicepersonalization.RequestToken p0) { return null; }
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
-    public void onCreate() {}
     public abstract android.adservices.ondevicepersonalization.IsolatedWorker onRequest(android.adservices.ondevicepersonalization.RequestToken p0);
 }

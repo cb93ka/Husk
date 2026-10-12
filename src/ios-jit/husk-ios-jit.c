@@ -565,37 +565,37 @@ static HuskDualMapping husk_ios_jit_allocate_real(size_t bytes)
 
     /* Writable alias of the same physical pages. Purely local -- no debugger
      * involvement, and therefore still available after detach. */
+    /* Near the executable view: the translation layer's loader retargets code at this alias with adrp, which reaches +-4 GiB,
+     * and a kernel left to choose (VM_FLAGS_ANYWHERE) can put it hundreds of GiB away (seen on iOS 27). Free addresses after
+     * the region, then before it, in 16 MiB steps out to 2 GiB; anywhere only if none is free. */
     vm_address_t rw = 0;
     vm_prot_t cur_prot = VM_PROT_NONE, max_prot = VM_PROT_NONE;
     kern_return_t kr = KERN_NO_SPACE;
-    /* Close to rx: the translation layer's loader retargets code at the writable view with adrp, which reaches
-     * +-4 GiB. Left to place the alias anywhere, the kernel sometimes put it hundreds of GiB away (0x7000000000)
-     * and every Android library then failed to load. Free slots right next to rx are tried first. */
-    for (int k = 1; k <= 6 && kr != KERN_SUCCESS; k++) {
-        for (int sgn = 1; sgn >= -1 && kr != KERN_SUCCESS; sgn -= 2) {
-            intptr_t at = (intptr_t)rx + sgn * k * (intptr_t)bytes;
-            if (at <= 0) continue;
-            rw = (vm_address_t)at;
+    const uintptr_t step = 16u << 20, reach = (uintptr_t)2 << 30;
+    for (uintptr_t off = 0; off <= reach && kr != KERN_SUCCESS; off += step) {
+        for (int side = 0; side < 2 && kr != KERN_SUCCESS; side++) {
+            uintptr_t want = side == 0 ? (uintptr_t)rx + bytes + off : (uintptr_t)rx - bytes - off;
+            if (side == 1 && (uintptr_t)rx < bytes + off + step) continue;
+            rw = (vm_address_t)want;
             kr = vm_remap(mach_task_self(), &rw, (vm_size_t)bytes, /*mask=*/0, VM_FLAGS_FIXED,
-                          mach_task_self(), (vm_address_t)rx, /*copy=*/FALSE, &cur_prot, &max_prot,
-                          VM_INHERIT_NONE);
+                          mach_task_self(), (vm_address_t)rx, /*copy=*/FALSE, &cur_prot, &max_prot, VM_INHERIT_NONE);
         }
     }
-    /* No free slot right beside it: let the kernel find room, starting the search just above rx and then 3 GiB below it (the
-     * address passed with VM_FLAGS_ANYWHERE is where the search begins), keeping the first alias that lands within reach. */
-    const intptr_t reach = (intptr_t)3 << 30;
-    intptr_t hints[2] = { (intptr_t)rx + (intptr_t)bytes, (intptr_t)rx > reach + 0x100000000 ? (intptr_t)rx - reach : 0x100000000 };
+    /* Nothing free at those addresses: let the kernel search from just above rx and from 3 GiB below it (the address passed with
+     * VM_FLAGS_ANYWHERE is where its search begins), keeping the first alias that lands within adrp's reach. */
+    const intptr_t far = (intptr_t)3 << 30;
+    intptr_t hints[2] = { (intptr_t)rx + (intptr_t)bytes, (intptr_t)rx > far + 0x100000000 ? (intptr_t)rx - far : 0x100000000 };
     for (int h = 0; h < 2 && kr != KERN_SUCCESS; h++) {
         rw = (vm_address_t)hints[h];
         kern_return_t k2 = vm_remap(mach_task_self(), &rw, (vm_size_t)bytes, /*mask=*/0, VM_FLAGS_ANYWHERE,
                                     mach_task_self(), (vm_address_t)rx, /*copy=*/FALSE, &cur_prot, &max_prot, VM_INHERIT_NONE);
         if (k2 != KERN_SUCCESS) continue;
         intptr_t d = (intptr_t)rw - (intptr_t)rx;
-        if (d < reach && d > -reach) { kr = KERN_SUCCESS; break; }
+        if (d < far && d > -far) { kr = KERN_SUCCESS; break; }
         vm_deallocate(mach_task_self(), rw, (vm_size_t)bytes);
     }
     if (kr != KERN_SUCCESS) {
-        HUSK_LOG("#%llu: no room for the writable alias within 3 GiB of rx=%p; the translation layer's libraries will not load", (unsigned long long)n, rx);
+        HUSK_LOG("#%llu: no free space within 3 GiB of rx=%p for the writable view: placing it anywhere", (unsigned long long)n, rx);
         rw = 0;
         kr = vm_remap(mach_task_self(), &rw, (vm_size_t)bytes,
                       /*mask=*/0, VM_FLAGS_ANYWHERE,

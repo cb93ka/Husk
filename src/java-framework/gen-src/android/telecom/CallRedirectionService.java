@@ -11,7 +11,6 @@ public abstract class CallRedirectionService extends android.app.Service {
     public void onPlaceCall(android.net.Uri p0, android.net.Uri p1, android.telecom.PhoneAccountHandle p2, boolean p3) {}
     public abstract void onPlaceCall(android.net.Uri p0, android.telecom.PhoneAccountHandle p1, boolean p2);
     public void onRedirectionTimeout() {}
-    public boolean onUnbind(android.content.Intent p0) { return false; }
     public void placeCallUnmodified() {}
     public void redirectCall(android.net.Uri p0, android.telecom.PhoneAccountHandle p1, boolean p2) {}
 }

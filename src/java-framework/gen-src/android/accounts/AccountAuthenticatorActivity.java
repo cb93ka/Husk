@@ -5,7 +5,5 @@ package android.accounts;
 public class AccountAuthenticatorActivity extends android.app.Activity {
     private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
     public AccountAuthenticatorActivity() { super(); }
-    public void finish() {}
-    public void onCreate(android.os.Bundle p0) {}
     public void setAccountAuthenticatorResult(android.os.Bundle p0) { huskProps.put("AccountAuthenticatorResult", p0); }
 }

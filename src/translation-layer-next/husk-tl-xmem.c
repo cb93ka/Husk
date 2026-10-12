@@ -116,6 +116,76 @@ static bool grant_self(size_t host_bytes, char *err, size_t errlen)
 #endif
 
 #if defined(__APPLE__) && !TARGET_OS_OSX
+/* The loader retargets code at the writable view with adrp (+-4 GiB). A region whose writable alias the kernel placed anywhere
+ * (VM_FLAGS_ANYWHERE: hundreds of GiB away on iOS 27) gets a second alias of the same pages next to the executable view: a local
+ * vm_remap, which needs no debugger. Free addresses after the region, then before it, in 16 MiB steps out to 2 GiB. */
+static bool near(uintptr_t a, uintptr_t rx) { intptr_t d = (intptr_t)(a - rx); return d < ((intptr_t)2 << 30) && d > -((intptr_t)2 << 30); }
+static bool adopt_alias(vm_address_t a, uintptr_t rx, size_t size, const char *how, ptrdiff_t was)
+{
+    if (!near(a, rx)) { vm_deallocate(mach_task_self(), a, size); return false; }
+    kern_return_t kr = vm_protect(mach_task_self(), a, size, FALSE, VM_PROT_READ | VM_PROT_WRITE);
+    if (kr != KERN_SUCCESS) { tl_log_line("xmem: %s alias at %p: vm_protect rw failed (%d)", how, (void *)a, kr); vm_deallocate(mach_task_self(), a, size); return false; }
+    tl_log_line("xmem: the writable view was %td MiB from the executable one; a new one (%s) at %p is %td MiB from it", was >> 20, how, (void *)a, (ptrdiff_t)(a - rx) >> 20);
+    g_x.rw = (uint8_t *)a;
+    return true;
+}
+static void near_alias(void)
+{
+    ptrdiff_t d = g_x.rw - g_x.rx;
+    if (d < ((ptrdiff_t)2 << 30) && d > -((ptrdiff_t)2 << 30)) return;
+    const uintptr_t step = 16u << 20, reach = (uintptr_t)2 << 30, rx = (uintptr_t)g_x.rx, size = g_x.size;
+    task_t me = mach_task_self();
+    vm_prot_t cur, max;
+    /* what is around the region, for the log */
+    {
+        vm_address_t a = rx; vm_size_t sz = 0; natural_t depth = 0; vm_region_submap_info_data_64_t info; mach_msg_type_number_t cnt = VM_REGION_SUBMAP_INFO_COUNT_64;
+        if (vm_region_recurse_64(me, &a, &sz, &depth, (vm_region_recurse_info_t)&info, &cnt) == KERN_SUCCESS)
+            tl_log_line("xmem: region rx %p size %zu MiB; the map entry there is %p..%p prot %d/%d tag %u", (void *)rx, size >> 20, (void *)a, (void *)(a + sz), info.protection, info.max_protection, info.user_tag);
+        a = rx + size; sz = 0; depth = 0; cnt = VM_REGION_SUBMAP_INFO_COUNT_64;
+        if (vm_region_recurse_64(me, &a, &sz, &depth, (vm_region_recurse_info_t)&info, &cnt) == KERN_SUCCESS)
+            tl_log_line("xmem: next entry after the region: %p..%p prot %d/%d tag %u", (void *)a, (void *)(a + sz), info.protection, info.max_protection, info.user_tag);
+    }
+    /* 1. the kernel's own search, upward from just after the region and from 2 GiB below it */
+    uintptr_t hints[2] = { rx + size, rx > reach ? rx - reach : 0 };
+    for (int h = 0; h < 2; h++) {
+        vm_address_t a = hints[h];
+        kern_return_t kr = vm_remap(me, &a, size, 0, VM_FLAGS_ANYWHERE, me, rx, FALSE, &cur, &max, VM_INHERIT_NONE);
+        if (kr != KERN_SUCCESS) { tl_log_line("xmem: remap searching from %p failed (%d)", (void *)hints[h], kr); continue; }
+        if (adopt_alias(a, rx, size, h ? "searched from below" : "searched from after", d)) return;
+        tl_log_line("xmem: remap searching from %p landed at %p, too far", (void *)hints[h], (void *)a);
+    }
+    /* 2. fixed addresses after, then before, in 16 MiB steps out to 2 GiB; and when no gap near the region holds all of it (a
+     *    region placed low in the address space, between other mappings), the largest part of it that fits: the region is used
+     *    from its start, so a shorter alias of its first part is a shorter region. */
+    kern_return_t first = KERN_SUCCESS;
+    for (uintptr_t want_size = size; want_size >= (64u << 20); want_size -= (32u << 20)) {
+        for (uintptr_t off = 0; off <= reach; off += step) {
+            for (int side = 0; side < 2; side++) {
+                if (side == 1 && rx < want_size + off + step) continue;
+                vm_address_t want = side == 0 ? rx + size + off : rx - want_size - off;
+                kern_return_t kr = vm_remap(me, &want, want_size, 0, VM_FLAGS_FIXED, me, rx, FALSE, &cur, &max, VM_INHERIT_NONE);
+                if (kr != KERN_SUCCESS) { if (first == KERN_SUCCESS) first = kr; continue; }
+                if (adopt_alias(want, rx, want_size, want_size == size ? "fixed" : "fixed, shorter", d)) {
+                    if (want_size < size) { tl_log_line("xmem: the region is used as %zu MiB of its %zu", (size_t)(want_size >> 20), (size_t)(size >> 20)); g_x.size = want_size; }
+                    return;
+                }
+            }
+        }
+    }
+    tl_log_line("xmem: fixed remaps near the region failed (first error %d)", first);
+    /* 3. a reservation first (plain memory, a hint near the region), then the alias over it */
+    for (int h = 0; h < 2; h++) {
+        void *res = mmap((void *)hints[h], size, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        if (res == MAP_FAILED) { tl_log_line("xmem: reservation near %p failed (%d)", (void *)hints[h], errno); continue; }
+        if (!near((uintptr_t)res, rx)) { tl_log_line("xmem: reservation near %p landed at %p, too far", (void *)hints[h], res); munmap(res, size); continue; }
+        vm_address_t a = (vm_address_t)res;
+        kern_return_t kr = vm_remap(me, &a, size, 0, VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, me, rx, FALSE, &cur, &max, VM_INHERIT_NONE);
+        if (kr != KERN_SUCCESS) { tl_log_line("xmem: alias over the reservation at %p failed (%d)", res, kr); munmap(res, size); continue; }
+        if (adopt_alias(a, rx, size, "over a reservation", d)) return;
+    }
+    tl_log_line("xmem: the writable view is %td MiB from the executable one and no address near it is free", d >> 20);
+}
+
 /* The phone: StikDebug's region if a debugger granted one, otherwise one the process makes for itself where the device allows that (before TXM). */
 static bool open_platform(size_t host_bytes, char *err, size_t errlen)
 {
@@ -124,6 +194,7 @@ static bool open_platform(size_t host_bytes, char *err, size_t errlen)
         g_x.rx = m->rx_addr;
         g_x.rw = m->rw_addr;
         g_x.size = m->size;
+        near_alias();
         return true;
     }
     /* From iOS 26 the Trusted Execution Monitor decides what may execute, and an attempt to run unblessed memory can end the process rather than fail. Only a debugger
@@ -220,6 +291,12 @@ bool tl_xmem_alloc(size_t bytes, uint8_t **rx, uint8_t **rw)
 }
 
 ptrdiff_t tl_xmem_delta(void) { return g_x.rw - g_x.rx; }
+bool tl_xmem_near(const void *p, size_t dist)
+{
+    if (!g_x.open || !p) return false;
+    uintptr_t a = (uintptr_t)p, lo = (uintptr_t)g_x.rx, hi = lo + g_x.size;
+    return a + dist >= lo && a <= hi + dist;
+}
 
 bool tl_xmem_contains(const void *p)
 {

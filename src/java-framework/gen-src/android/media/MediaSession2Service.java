@@ -9,8 +9,6 @@ public abstract class MediaSession2Service extends android.app.Service {
     public void addSession(android.media.MediaSession2 p0) {}
     public java.util.List getSessions() { return (huskProps.get("Sessions") != null ? (java.util.List) huskProps.get("Sessions") : new java.util.ArrayList()); }
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
-    public void onCreate() {}
-    public void onDestroy() {}
     public abstract android.media.MediaSession2 onGetSession(android.media.MediaSession2.ControllerInfo p0);
     public abstract android.media.MediaSession2Service.MediaNotification onUpdateNotification(android.media.MediaSession2 p0);
     public void removeSession(android.media.MediaSession2 p0) {}

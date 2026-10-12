@@ -65,7 +65,7 @@ static bool is_dex(const char *name)
 
 /* Recognised by the libraries an engine always ships. */
 typedef struct engine_scan {
-    bool il2cpp, unity, mono_unity, flutter, react, dotnet, godot, unreal, cocos, gdx, minecraft, sdl, sdl2, mainlib, rockstar_game, openal, mpg123, sdl_symbols, native_activity, cordova, capacitor, gamemaker, python, supercell;
+    bool il2cpp, unity, mono_unity, flutter, react, dotnet, godot, unreal, cocos, gdx, minecraft, sdl, sdl2, mainlib, rockstar_game, openal, mpg123, sdl_symbols, native_activity, cordova, capacitor, gamemaker, python, supercell, unity_library, unity6;
 } engine_scan;
 
 static void note_engine(engine_scan *s, const char *f)
@@ -96,6 +96,9 @@ static const char *engine_name(const engine_scan *s)
 {
     /* Rockstar's GTA port: libGame with its own OpenAL and mpg123 (a Flutter shell around it would otherwise make it look like a Flutter app). */
     if (s->rockstar_game && s->openal && s->mpg123) return "Rockstar";
+    if ((s->il2cpp || s->unity) && s->unity_library) return NULL;
+    /* Unity 6 starts through UnityPlayerForActivityOrService: its own Java activity runs it, on the Java runtime */
+    if ((s->il2cpp || s->unity) && s->unity6) return "Unity 6";
     if (s->il2cpp) return "Unity (IL2CPP)";
     if (s->unity) return s->mono_unity ? "Unity (Mono)" : "Unity";
     /* Supercell's games (libg.so) carry a Flutter module for some screens; the game itself is their engine behind a Java activity */
@@ -280,8 +283,9 @@ char *husk_tl_scan(const char *const *paths, int count)
             const tl_zip_entry *e = &z.entries[i];
             const char *file = NULL;
             int abi = lib_abi(e->name, &file);
-            if (!strcmp(e->name, "assets/capacitor.config.json") || !strcmp(e->name, "assets/public/index.html")) eng.capacitor = true;
-            if (!strcmp(e->name, "assets/www/cordova.js") || !strcmp(e->name, "assets/www/index.html")) eng.cordova = true;
+            /* the frameworks' own files: an index.html under www/ or public/ alone is any app's (X keeps one for a web view) */
+            if (!strcmp(e->name, "assets/capacitor.config.json")) eng.capacitor = true;
+            if (!strcmp(e->name, "assets/www/cordova.js") || !strcmp(e->name, "assets/www/cordova_plugins.js")) eng.cordova = true;
             if (!strcmp(e->name, "AndroidManifest.xml")) {
                 manifest = true;
             } else if (is_dex(e->name)) {
@@ -310,6 +314,8 @@ char *husk_tl_scan(const char *const *paths, int count)
                 rep->packing = "none";
             } else if (tl_zip_data(&z, e, LIB_LIMIT, &data, &len, &owned, derr, sizeof(derr))) {
                 tl_elf_analyze(data, len, rep);
+                static const char u6[] = "UnityPlayerForActivityOrService";
+                if (!strcmp(file, "libunity.so") && memmem(data, len, u6, sizeof(u6) - 1)) eng.unity6 = true;
                 if (owned) free((void *)data);
             } else {
                 memset(rep, 0, sizeof(*rep));
@@ -321,6 +327,9 @@ char *husk_tl_scan(const char *const *paths, int count)
             }
             if (rep->exports_sdl_main) eng.sdl_symbols = true;
             if (rep->exports_native_activity) eng.native_activity = true;
+            /* Unity's libmain starts the game from Java through JNI_OnLoad; an app that only embeds Unity ("Unity as a Library",
+             * Duolingo) ships a libmain without it, and is an ordinary app around it */
+            if (!strcmp(file, "libmain.so") && !rep->exports_jni_onload) eng.unity_library = true;
             arm64_libs++;
             if (strcmp(lib_status(rep), "ok") != 0) {
                 arm64_trouble++;

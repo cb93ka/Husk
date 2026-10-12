@@ -9,11 +9,5 @@ public class ActivityGroup extends android.app.Activity {
     public ActivityGroup(boolean p0) { super(); }
     public android.app.Activity getCurrentActivity() { return (android.app.Activity) huskProps.get("CurrentActivity"); }
     public android.app.LocalActivityManager getLocalActivityManager() { return (android.app.LocalActivityManager) huskProps.get("LocalActivityManager"); }
-    public void onCreate(android.os.Bundle p0) {}
-    public void onDestroy() {}
-    public void onPause() {}
-    public void onResume() {}
     public java.util.HashMap onRetainNonConfigurationChildInstances() { return null; }
-    public void onSaveInstanceState(android.os.Bundle p0) {}
-    public void onStop() {}
 }

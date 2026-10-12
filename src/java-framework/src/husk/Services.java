@@ -44,6 +44,12 @@ public final class Services {
     }
     public static void stopSelf(Service s) { String k = null; for (java.util.Map.Entry<String, Service> e : sRunning.entrySet()) if (e.getValue() == s) k = e.getKey(); if (k != null) { sRunning.remove(k); s.onDestroy(); } }
     public static boolean bind(Context from, Intent i, ServiceConnection conn) {
+        final IBinder play = PlayStore.bind(i);
+        if (play != null) {
+            final ComponentName cn = new ComponentName(GooglePackages.VENDING, i.getAction());
+            new Handler(Looper.getMainLooper()).post(() -> conn.onServiceConnected(cn, play));
+            return true;
+        }
         Manifest.Component c = find(i);
         if (c == null) return false;
         new Handler(Looper.getMainLooper()).post(() -> {

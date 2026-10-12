@@ -55,12 +55,23 @@ public class AlertDialog extends Dialog implements DialogInterface {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(0, (int) dp(24), 0, (int) dp(8));
         // title
+        int alertTitleId = 0;
+        try { alertTitleId = android.content.res.Resources.getSystem().getIdentifier("alertTitle", "id", "android"); } catch (RuntimeException e) { }
         if (mCustomTitle != null) root.addView(mCustomTitle);
-        else if (mTitle != null && mTitle.length() > 0) {
+        else if (mTitle == null || mTitle.length() == 0) {
+            /* the platform's title view is there with no title too (android:id/alertTitle), hidden: SDKs look it up and style it */
+            mTitleView = new TextView(c);
+            if (alertTitleId != 0) mTitleView.setId(alertTitleId);
+            mTitleView.setTextColor(textPrimary);
+            mTitleView.setVisibility(View.GONE);
+            root.addView(mTitleView);
+        }
+        else {
             LinearLayout tl = new LinearLayout(c); tl.setOrientation(LinearLayout.HORIZONTAL); tl.setGravity(Gravity.CENTER_VERTICAL);
             tl.setPadding((int) dp(24), 0, (int) dp(24), (int) dp(16));
             if (mIcon != null) { ImageView iv = new ImageView(c); iv.setImageDrawable(mIcon); iv.setScaleType(ImageView.ScaleType.FIT_CENTER); LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams((int) dp(32), (int) dp(32)); ip.rightMargin = (int) dp(8); tl.addView(iv, ip); }
             mTitleView = new TextView(c);
+            if (alertTitleId != 0) mTitleView.setId(alertTitleId);
             mTitleView.setText(mTitle); mTitleView.setTextColor(textPrimary); mTitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
             mTitleView.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
             mTitleView.setId(alertTitleId());
@@ -74,10 +85,11 @@ public class AlertDialog extends Dialog implements DialogInterface {
             root.addView(mTitleView);
         }
         // body: message, list or the app's view
-        if (mMessage != null) {
+        {   /* the message's TextView is always there (android:id/message), hidden with no message, as the platform's layout has it */
             ScrollView sv = new ScrollView(c);
             mMessageView = new TextView(c);
             mMessageView.setId(android.R.id.message);
+            if (mMessage == null) sv.setVisibility(View.GONE);
             mMessageView.setText(mMessage); mMessageView.setTextColor(textSecondary); mMessageView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
             mMessageView.setLineSpacing(0, 1.15f);
             mMessageView.setPadding((int) dp(24), 0, (int) dp(24), (int) dp(16));
@@ -143,6 +155,13 @@ public class AlertDialog extends Dialog implements DialogInterface {
             }
             root.addView(bar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         } else root.setPadding(0, (int) dp(24), 0, (int) dp(mAdapter != null ? 8 : 24));
+        // as the platform's: all three buttons exist, the ones with no text hidden, so getButton never answers null once shown
+        for (int k = 0; k < 3; k++) if (mButtons[k] == null) {
+            Button b = new Button(c, null, 0);
+            b.setId(k == 0 ? android.R.id.button1 : k == 1 ? android.R.id.button2 : android.R.id.button3);
+            b.setVisibility(View.GONE);
+            mButtons[k] = b;
+        }
         setContentView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         int sw = husk.Native.screenWidth();
         getWindow().setLayout(Math.min((int) (sw * 0.9f), (int) dp(560)), ViewGroup.LayoutParams.WRAP_CONTENT);

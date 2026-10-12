@@ -15,7 +15,6 @@ public class PresetReverb extends android.media.audiofx.AudioEffect {
     public PresetReverb(int p0, int p1) { super((java.util.UUID) null, (android.media.AudioDeviceAttributes) null); }
     public short getPreset() { return (huskProps.get("Preset") instanceof Short ? (Short) huskProps.get("Preset") : (short) 0); }
     public android.media.audiofx.PresetReverb.Settings getProperties() { return (android.media.audiofx.PresetReverb.Settings) huskProps.get("Properties"); }
-    public void setParameterListener(android.media.audiofx.PresetReverb.OnParameterChangeListener p0) { huskProps.put("ParameterListener", p0); }
     public void setPreset(short p0) { huskProps.put("Preset", Short.valueOf(p0)); }
     public void setProperties(android.media.audiofx.PresetReverb.Settings p0) { huskProps.put("Properties", p0); }
     PresetReverb() { this((int) 0, (int) 0); }

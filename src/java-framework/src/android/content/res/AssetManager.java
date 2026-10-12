@@ -9,13 +9,32 @@ public final class AssetManager implements AutoCloseable {
     private static String norm(String p) { while (p.startsWith("/")) p = p.substring(1); while (p.startsWith("./")) p = p.substring(2); return p; }
     public InputStream open(String name) throws IOException { return open(name, ACCESS_STREAMING); }
     public InputStream open(String name, int mode) throws IOException {
-        byte[] b = husk.Native.readAsset(norm(name));
+        String n = norm(name);
+        long len = husk.Native.assetLength(n);
+        // a large asset stored uncompressed is read from the APK as it is consumed, not copied whole into memory (a game's
+        // repacked data, hundreds of MB, unpacked through this stream on first launch)
+        if (len > (8 << 20)) {
+            long fdoff = husk.Native.assetFd(n);
+            if (fdoff != -1) return new StoredAssetStream((int) (fdoff >>> 40), fdoff & 0xFFFFFFFFFFL, len);
+        }
+        byte[] b = husk.Native.readAsset(n);
         if (b == null) throw new FileNotFoundException(name);
         return new ByteArrayInputStream(b);
     }
     public String[] list(String path) throws IOException { String[] l = husk.Native.listAssets(norm(path)); return l == null ? new String[0] : l; }
-    public AssetFileDescriptor openFd(String name) throws IOException {
-        String n = norm(name);
+    public AssetFileDescriptor openFd(String name) throws IOException { return fd(norm(name), name); }
+    /** A file from the APK's root rather than assets/ (SoLoader reads lib/<abi>/*.so this way) */
+    public AssetFileDescriptor openNonAssetFd(String name) throws IOException { return fd("/" + norm(name), name); }
+    public AssetFileDescriptor openNonAssetFd(int cookie, String name) throws IOException { return openNonAssetFd(name); }
+    public InputStream openNonAsset(String name) throws IOException {
+        byte[] b = husk.Native.readAsset("/" + norm(name));
+        if (b == null) throw new FileNotFoundException(name);
+        return new ByteArrayInputStream(b);
+    }
+    public InputStream openNonAsset(int cookie, String name) throws IOException { return openNonAsset(name); }
+    public InputStream openNonAsset(String name, int mode) throws IOException { return openNonAsset(name); }
+    public InputStream openNonAsset(int cookie, String name, int mode) throws IOException { return openNonAsset(name); }
+    private AssetFileDescriptor fd(String n, String name) throws IOException {
         long fdoff = husk.Native.assetFd(n);
         if (fdoff == -1) throw new FileNotFoundException("This file can not be opened as a file descriptor; it is probably compressed: " + name);
         long len = husk.Native.assetLength(n);
@@ -23,8 +42,37 @@ public final class AssetManager implements AutoCloseable {
         try { java.lang.reflect.Field f = FileDescriptor.class.getDeclaredField("descriptor"); f.setAccessible(true); f.setInt(fd, (int) (fdoff >>> 40)); } catch (Exception e) { }
         return new AssetFileDescriptor(n, fd, fdoff & 0xFFFFFFFFFFL, len);
     }
-    public AssetFileDescriptor openNonAssetFd(String name) throws IOException { return openFd(name); }
     public String[] getLocales() { return new String[] { "en-US" }; }
+
+    /** An uncompressed asset read in place from the APK through its own descriptor. */
+    private static final class StoredAssetStream extends AssetInputStream {
+        private final FileInputStream file;
+        private final java.nio.channels.FileChannel ch;
+        private final long start, len;
+        private long pos, mark;
+        StoredAssetStream(int fdNum, long start, long len) {
+            FileDescriptor fd = new FileDescriptor();
+            try { java.lang.reflect.Field f = FileDescriptor.class.getDeclaredField("descriptor"); f.setAccessible(true); f.setInt(fd, fdNum); } catch (Exception e) { }
+            file = new FileInputStream(fd); ch = file.getChannel();
+            this.start = start; this.len = len;
+        }
+        @Override public int read() throws IOException { byte[] one = new byte[1]; return read(one, 0, 1) == 1 ? one[0] & 0xff : -1; }
+        @Override public int read(byte[] b, int off, int n) throws IOException {
+            if (n == 0) return 0;
+            if (pos >= len) return -1;
+            if (n > len - pos) n = (int) (len - pos);
+            int r = ch.read(java.nio.ByteBuffer.wrap(b, off, n), start + pos);
+            if (r <= 0) return -1;
+            pos += r;
+            return r;
+        }
+        @Override public long skip(long n) { if (n <= 0) return 0; if (n > len - pos) n = len - pos; pos += n; return n; }
+        @Override public int available() { long a = len - pos; return a > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) a; }
+        @Override public boolean markSupported() { return true; }
+        @Override public void mark(int limit) { mark = pos; }
+        @Override public void reset() { pos = mark; }
+        @Override public void close() throws IOException { file.close(); }
+    }
     public void close() {}
     // ---- generated by tools/compat/genstubs.py: signatures only
     public static abstract class AssetInputStream extends java.io.InputStream {
@@ -34,16 +82,6 @@ public final class AssetManager implements AutoCloseable {
         public long getNativeAsset() { return 0L; }
         // ---- end of generated members (AssetInputStream)
     }
-    // ---- generated by tools/compat/genstubs.py: the platform's nested classes this class does not write
-    public static class Builder {
-        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
-        public Builder() {}
-        public android.content.res.AssetManager.Builder addApkAssets(android.content.res.ApkAssets p0) { return this; }
-        public android.content.res.AssetManager.Builder addLoader(android.content.res.loader.ResourcesLoader p0) { return this; }
-        public android.content.res.AssetManager build() { return null; }
-        public android.content.res.AssetManager.Builder setNoInit() { return this; }
-    }
-    // ---- end of generated nested classes
     // ---- generated by tools/compat/fillmembers.py: the platform's members this class does not write (signatures only)
     private final java.util.HashMap<String, Object> huskFill = new java.util.HashMap<>();
     public static final int COOKIE_UNKNOWN = -1;
@@ -69,11 +107,6 @@ public final class AssetManager implements AutoCloseable {
     public java.util.Map getOverlayableMap(java.lang.String p0) { return new java.util.HashMap(); }
     public java.lang.String getOverlayablesToString(java.lang.String p0) { return null; }
     public boolean isUpToDate() { return false; }
-    public java.io.InputStream openNonAsset(int p0, java.lang.String p1) { return null; }
-    public java.io.InputStream openNonAsset(int p0, java.lang.String p1, int p2) { return null; }
-    public java.io.InputStream openNonAsset(java.lang.String p0) { return null; }
-    public java.io.InputStream openNonAsset(java.lang.String p0, int p1) { return null; }
-    public android.content.res.AssetFileDescriptor openNonAssetFd(int p0, java.lang.String p1) { return null; }
     public android.content.res.XmlResourceParser openXmlResourceParser(int p0, java.lang.String p1) { return null; }
     public android.content.res.XmlResourceParser openXmlResourceParser(int p0, java.lang.String p1, boolean p2) { return null; }
     public android.content.res.XmlResourceParser openXmlResourceParser(java.lang.String p0) { return null; }
@@ -82,4 +115,14 @@ public final class AssetManager implements AutoCloseable {
     public void setOverlayConstraints(int p0, int p1) {}
     public void setResourceResolutionLoggingEnabled(boolean p0) {}
     // ---- end of generated members
+    // ---- generated by tools/compat/genstubs.py: the platform's nested classes this class does not write
+    public static class Builder {
+        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
+        public Builder() {}
+        public android.content.res.AssetManager.Builder addApkAssets(android.content.res.ApkAssets p0) { return this; }
+        public android.content.res.AssetManager.Builder addLoader(android.content.res.loader.ResourcesLoader p0) { return this; }
+        public android.content.res.AssetManager build() { return null; }
+        public android.content.res.AssetManager.Builder setNoInit() { return this; }
+    }
+    // ---- end of generated nested classes
 }

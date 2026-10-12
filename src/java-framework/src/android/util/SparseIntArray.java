@@ -21,7 +21,7 @@ public class SparseIntArray implements Cloneable {
     public int keyAt(int i) { return k[i]; }
     public int valueAt(int i) { return v[i]; }
     public void setValueAt(int i, int value) { v[i] = value; }
-    public int indexOfKey(int key) { int i = find(key); return i < 0 ? -1 : i; }
+    public int indexOfKey(int key) { return find(key); }   /* not there: the complement of where it would go, as Android's */
     public int indexOfValue(int value) { for (int i = 0; i < n; i++) if (v[i] == value) return i; return -1; }
     public void clear() { n = 0; }
     public int[] copyKeys() { return java.util.Arrays.copyOf(k, n); }

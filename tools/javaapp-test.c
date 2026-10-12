@@ -12,6 +12,8 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <dlfcn.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -42,12 +44,21 @@ void tl_log_line(const char *fmt, ...)
     pthread_mutex_unlock(&m);
 }
 
+static struct timespec g_start;                 /* when the run began (the quit summary) */
+
 static void describe(const char *label, const void *addr)
 {
     const char *lib = NULL; const void *sa = NULL;
     const char *sym = tl_ld_symbol_at(addr, &lib, &sa);
     if (lib) fprintf(stderr, "  %-6s %p  %s  %s+%#lx\n", label, addr, lib, sym ? sym : "?", sa ? (unsigned long)((const char *)addr - (const char *)sa) : 0ul);
-    else fprintf(stderr, "  %-6s %p\n", label, addr);
+    else {
+        /* host code: the image and the address as atos -l 0x100000000 takes it (the binary is slid) */
+        Dl_info di;
+        if (dladdr(addr, &di) && di.dli_fbase)
+            fprintf(stderr, "  %-6s %p  %s  %s (atos addr %#lx)\n", label, addr, strrchr(di.dli_fname, '/') ? strrchr(di.dli_fname, '/') + 1 : di.dli_fname,
+                    di.dli_sname ? di.dli_sname : "?", (unsigned long)((const char *)addr - (const char *)di.dli_fbase) + 0x100000000ul);
+        else fprintf(stderr, "  %-6s %p\n", label, addr);
+    }
 }
 
 static int safe_read(uintptr_t addr, void *out, size_t n)
@@ -60,6 +71,9 @@ static void on_crash(int sig, siginfo_t *info, void *uctx)
 {
     ucontext_t *uc = uctx;
     _STRUCT_ARM_THREAD_STATE64 *ss = &uc->uc_mcontext->__ss;
+    /* one report: a second thread faulting meanwhile (often the same bug) waits for the first to end the process */
+    static atomic_flag reporting = ATOMIC_FLAG_INIT;
+    if (atomic_flag_test_and_set(&reporting)) for (;;) pause();
     char tn[32] = ""; pthread_getname_np(pthread_self(), tn, sizeof(tn));
     fprintf(stderr, "\n=== CRASH: signal %d, fault address %p, thread '%s' ===\n", sig, info->si_addr, tn);
     describe("pc", (void *)ss->__pc);
@@ -81,6 +95,7 @@ static void on_crash(int sig, siginfo_t *info, void *uctx)
     for (int i = 0; i < 29; i += 4)
         fprintf(stderr, "  x%d=%#llx x%d=%#llx x%d=%#llx x%d=%#llx\n", i, ss->__x[i], i + 1, ss->__x[i + 1], i + 2, i + 2 < 29 ? ss->__x[i + 2] : 0, i + 3, i + 3 < 29 ? ss->__x[i + 3] : 0);
     fprintf(stderr, "  sp=%#llx fp=%#llx\n", ss->__sp, ss->__fp);
+    { void tl_dvm_print_stack(FILE *, int); tl_dvm_print_stack(stderr, 24); }
     fflush(stderr);
     _exit(139);
 }
@@ -133,7 +148,12 @@ static void *control_thread(void *arg)
             else if (!strncmp(line, "back", 4)) tl_javaapp_back();
             else if (!strncmp(line, "pause", 5)) tl_javaapp_set_paused(true);
             else if (!strncmp(line, "resume", 6)) tl_javaapp_set_paused(false);
-            else if (!strncmp(line, "quit", 4)) { fprintf(stderr, "ctl: quit\n"); fflush(stderr); _exit(0); }
+            else if (!strncmp(line, "quit", 4)) {
+                /* the run's frame count, as a timed-out run says it (sweeps compare it) */
+                struct timespec now; clock_gettime(CLOCK_MONOTONIC, &now);
+                fprintf(stderr, "javaapp: %lu frames in %d s\nctl: quit\n", tl_javaapp_frames(), (int)(now.tv_sec - g_start.tv_sec));
+                fflush(stderr); _exit(0);
+            }
         }
         fclose(f);
     }
@@ -145,6 +165,7 @@ typedef struct { int argc; char **argv; } job;
 static void *run(void *p)
 {
     job *j = p; char **argv = j->argv; int argc = j->argc;
+    { stack_t ss = { .ss_sp = malloc(64 << 10), .ss_size = 64 << 10, .ss_flags = 0 }; sigaltstack(&ss, NULL); }   /* a crash here is reported even when the stack is spent */
     const char *art = getenv("TL_ART") ? getenv("TL_ART") : "/Volumes/GTAV/husk2/root/apex/com.android.art";
     static const char *const jars[] = { "core-oj", "core-libart", "okhttp", "bouncycastle", "apache-xml" };
     static char paths[10][700]; const char *boot[10]; int nb = 0;
@@ -162,6 +183,8 @@ static void *run(void *p)
     if (!tl_dvm_start(boot, nb)) { fprintf(stderr, "dvm start failed\n"); _exit(1); }
     { char d[800]; snprintf(d, sizeof(d), "%s/../com.android.i18n/lib64", art); tl_ld_add_search_dir(d); }
     { char d[800]; snprintf(d, sizeof(d), "%s/../com.android.conscrypt/lib64", art); tl_ld_add_search_dir(d); }
+    /* the system's fonts and their list (/system/fonts, fonts.xml), as the app ships them: Qt and Skia read them by path */
+    { void tl_set_system_fonts_dir(const char *); tl_set_system_fonts_dir(getenv("TL_SYSFONTS") ? getenv("TL_SYSFONTS") : "/Volumes/GTAV/husk2/root/system"); }
     { void tl_set_cacerts_dir(const char *); static char d[800]; snprintf(d, sizeof(d), "%s/../com.android.conscrypt/cacerts", art); tl_set_cacerts_dir(d); }   /* the trusted roots, as the app ships them */
     { char d[800]; snprintf(d, sizeof(d), "%s/lib64", art); tl_dvm_load_natives(d); }
     /* TL_SYSTEM_FILES: the android-system folder the app carries (fonts/, etc/, cacerts/), as the app sets it */
@@ -190,6 +213,8 @@ static void *run(void *p)
         for (int i = 0; i < n; i++) if (i != bi) { char sp[1400]; snprintf(sp, sizeof(sp), "%s/%s", apk, names[i]); tl_ld_queue_split(sp); fprintf(stderr, "javaapp: split %s\n", names[i]); }
         apk = base;
     }
+    /* no size given: the screen turned the way the manifest asks, as the app turns it before starting a landscape game */
+    if (argc <= 4) { int tl_manifest_orientation(const char *); if (tl_manifest_orientation(apk) == 0) { int t = w; w = h; h = t; fprintf(stderr, "javaapp: landscape (the manifest asks for it)\n"); } }
     if (getenv("TL_SPLITS")) { char *l = strdup(getenv("TL_SPLITS")); for (char *t = strtok(l, ":"); t; t = strtok(NULL, ":")) tl_ld_queue_split(t); }
     tl_javaapp_config cfg = { .apk_path = apk, .data_dir = tmp, .package_name = getenv("TL_PACKAGE"), .width = w, .height = h, .density = 2.625f,
                               .angle_egl = getenv("TL_ANGLE_EGL") ? getenv("TL_ANGLE_EGL") : egl, .angle_gles = getenv("TL_ANGLE_GLES") ? getenv("TL_ANGLE_GLES") : gles,
@@ -210,6 +235,7 @@ static void *run(void *p)
 
 int main(int argc, char **argv)
 {
+    clock_gettime(CLOCK_MONOTONIC, &g_start);
     if (argc < 2) { fprintf(stderr, "usage: %s <apk> [seconds] [width height]\n", argv[0]); return 2; }
     static uint8_t altstack[1 << 16];
     stack_t ss = { .ss_sp = altstack, .ss_size = sizeof(altstack) };

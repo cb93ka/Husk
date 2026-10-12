@@ -69,6 +69,8 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
     private int mBreakStrategy, mHyphenation, mJustification;
     private Locale mLocale;
     private int mAutoSizeType;
+    private float mAutoMin = -1, mAutoMax = -1, mAutoStep = -1;
+    private int[] mAutoSizes;                       /* the sizes autosizing chooses from, ascending, px */
     private float mLetterSpacing;
     private ChangeWatcher mChangeWatcher;
 
@@ -83,7 +85,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
         TypedArray ta = c.obtainStyledAttributes(attrs, husk.S.TextView, defStyleAttr, defStyleRes);
         int appearance = ta.getResourceId(husk.S.TextView_textAppearance, -1);
         if (appearance == -1) { TypedValue v = new TypedValue(); if (c.getTheme().resolveAttribute(android.R.attr.textAppearance, v, true) && v.resourceId != 0) appearance = v.resourceId; }
-        if (appearance != -1 && appearance != 0) setTextAppearance(appearance);
+        if (appearance != -1 && appearance != 0) applyTextAppearance(getContext(), appearance);   // not the overridable setter: a subclass is not constructed yet
         CharSequence text = "", hint = null;
         int inputType = EditorInfo.TYPE_NULL, ellipsize = -1, lines = -1, maxLines = -1, minLines = -1, ems = -1, maxEms = -1, minEms = -1, maxLength = -1;
         boolean singleLine = false, password = false, editable = false, phone = false, hasNumeric = false;
@@ -160,6 +162,20 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
             }
         }
         ta.recycle();
+        if (mAutoSizeType == AUTO_SIZE_TEXT_TYPE_UNIFORM) {
+            TypedArray aa = c.obtainStyledAttributes(attrs, new int[] { android.R.attr.autoSizeStepGranularity, android.R.attr.autoSizePresetSizes, android.R.attr.autoSizeMinTextSize, android.R.attr.autoSizeMaxTextSize }, defStyleAttr, defStyleRes);
+            float step = aa.getDimension(0, -1), min = aa.getDimension(2, -1), max = aa.getDimension(3, -1);
+            int presets = aa.getResourceId(1, 0);
+            aa.recycle();
+            int[] ps = null;
+            if (presets != 0) {
+                TypedArray pa = getResources().obtainTypedArray(presets);
+                ps = new int[pa.length()];
+                for (int i = 0; i < ps.length; i++) ps[i] = pa.getDimensionPixelSize(i, -1);
+                pa.recycle();
+            }
+            if (ps != null && ps.length > 0) setAutoSizePresetsPx(ps); else setAutoSizeRangePx(min, max, step);
+        }
         if (family != null || typefaceIndex >= 0 || styleIndex >= 0 || weight >= 0) setTypefaceFromAttrs(family, typefaceIndex, styleIndex >= 0 ? styleIndex : (mTextPaint.getTypeface() != null ? mTextPaint.getTypeface().getStyle() : 0), weight);
         if (ds != null) dl = ds;
         if (de != null) dr = de;
@@ -182,6 +198,8 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
             if ((mInputType & EditorInfo.TYPE_MASK_CLASS) != EditorInfo.TYPE_CLASS_TEXT || (mInputType & EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE) == 0) { if (lines < 0 && maxLines < 0 && (mInputType & EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE) == 0) singleLine = true; }
         } else if (mTextIsSelectable) { bt = BufferType.SPANNABLE; mMovement = ArrowKeyMovementMethod.getInstance(); }
         if (mAutoLinkMask != 0) bt = bt == BufferType.EDITABLE ? bt : BufferType.SPANNABLE;
+        // textAllCaps from the layout or style: as Android, an all-caps transformation unless one is set already (password)
+        if (mAllCaps && mTransformation == null) mTransformation = new AllCapsTransformation();
         if (singleLine) applySingleLine(true, mTransformation == null);
         if (lines >= 0) setLines(lines);
         else { if (maxLines >= 0) setMaxLines(maxLines); if (minLines >= 0) setMinLines(minLines); }
@@ -205,7 +223,8 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
 
     // ---- appearance
     public void setTextAppearance(int resId) { setTextAppearance(getContext(), resId); }
-    @Deprecated public void setTextAppearance(Context c, int resId) {
+    @Deprecated public void setTextAppearance(Context c, int resId) { applyTextAppearance(c, resId); }
+    private void applyTextAppearance(Context c, int resId) {
         TypedArray a = c.obtainStyledAttributes(resId, husk.S.TextAppearance);
         ColorStateList col = a.getColorStateList(husk.S.TextAppearance_textColor);
         if (col != null) mTextColor = col;
@@ -492,9 +511,63 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
     public void setTextLocale(Locale l) { mLocale = l; mTextPaint.setTextLocale(l); }
     public Locale getTextLocale() { return mLocale != null ? mLocale : Locale.getDefault(); }
     public void setTextLocales(android.os.LocaleList l) {}
-    public void setAutoSizeTextTypeWithDefaults(int t) { mAutoSizeType = t; }
-    public void setAutoSizeTextTypeUniformWithConfiguration(int min, int max, int step, int unit) { mAutoSizeType = AUTO_SIZE_TEXT_TYPE_UNIFORM; }
-    public void setAutoSizeTextTypeUniformWithPresetSizes(int[] sizes, int unit) { mAutoSizeType = AUTO_SIZE_TEXT_TYPE_UNIFORM; }
+    public void setAutoSizeTextTypeWithDefaults(int t) {
+        mAutoSizeType = t;
+        if (t == AUTO_SIZE_TEXT_TYPE_UNIFORM) setAutoSizeRangePx(-1, -1, -1); else { mAutoSizes = null; mAutoMin = mAutoMax = mAutoStep = -1; }
+        relayout();
+    }
+    public void setAutoSizeTextTypeUniformWithConfiguration(int min, int max, int step, int unit) {
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        float mn = TypedValue.applyDimension(unit, min, dm), mx = TypedValue.applyDimension(unit, max, dm), st = TypedValue.applyDimension(unit, step, dm);
+        if (mn <= 0 || mx <= mn || st <= 0) throw new IllegalArgumentException("invalid autosize configuration: " + min + ".." + max + " step " + step);
+        mAutoSizeType = AUTO_SIZE_TEXT_TYPE_UNIFORM; setAutoSizeRangePx(mn, mx, st); relayout();
+    }
+    public void setAutoSizeTextTypeUniformWithPresetSizes(int[] sizes, int unit) {
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        int[] px = new int[sizes.length];
+        for (int i = 0; i < sizes.length; i++) px[i] = Math.round(TypedValue.applyDimension(unit, sizes[i], dm));
+        mAutoSizeType = AUTO_SIZE_TEXT_TYPE_UNIFORM; setAutoSizePresetsPx(px); relayout();
+    }
+    /* Android's defaults: 12sp to 112sp in 1px steps */
+    private void setAutoSizeRangePx(float min, float max, float step) {
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        if (min <= 0) min = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12, dm);
+        if (max <= 0) max = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 112, dm);
+        if (step <= 0) step = 1;
+        if (max < min) max = min;
+        mAutoMin = min; mAutoMax = max; mAutoStep = step;
+        int n = (int) Math.floor((max - min) / step) + 1;
+        mAutoSizes = new int[n];
+        for (int i = 0; i < n; i++) mAutoSizes[i] = Math.round(min + i * step);
+    }
+    private void setAutoSizePresetsPx(int[] px) {
+        java.util.TreeSet<Integer> set = new java.util.TreeSet<>();
+        for (int v : px) if (v > 0) set.add(v);
+        mAutoSizes = new int[set.size()]; int i = 0; for (int v : set) mAutoSizes[i++] = v;
+        if (mAutoSizes.length > 0) { mAutoMin = mAutoSizes[0]; mAutoMax = mAutoSizes[mAutoSizes.length - 1]; mAutoStep = -1; }
+    }
+    /* the largest size whose layout fits the box (and the line limit), as TextView.findLargestTextSizeWhichFits */
+    private void autoSizeText(int availW, int availH) {
+        if (mAutoSizeType != AUTO_SIZE_TEXT_TYPE_UNIFORM || mAutoSizes == null || mAutoSizes.length == 0 || availW <= 0 || availH <= 0 || mTransformed == null) return;
+        float orig = mTextPaint.getTextSize();
+        int lo = 0, hi = mAutoSizes.length - 1, best = 0;
+        while (lo <= hi) {
+            int mid = (lo + hi) >>> 1;
+            mTextPaint.setTextSize(mAutoSizes[mid]);
+            if (fits(availW, availH)) { best = mid; lo = mid + 1; } else hi = mid - 1;
+        }
+        float size = mAutoSizes[best];
+        mTextPaint.setTextSize(size);
+        if (size != orig || mLayout == null || mLayout.getWidth() != availW) { mLayout = makeLayout(mTransformed, availW, false); mHintLayout = null; }
+    }
+    private boolean fits(int availW, int availH) {
+        CharSequence t = mTransformed;
+        Layout l = StaticLayout.Builder.obtain(t, 0, t.length(), mTextPaint, availW).setAlignment(alignment()).setLineSpacing(mSpacingAdd, mSpacingMult).setIncludePad(mIncludePad).build();
+        int max = mMaxMode == LINES ? mMaxLines : -1;
+        if (max != -1 && max != Integer.MAX_VALUE && (l.getLineCount() > max || l.getLineEnd(l.getLineCount() - 1) != t.length())) return false;
+        if (max == 1 && Layout.getDesiredWidth(t, mTextPaint) > availW) return false;
+        return l.getHeight() <= availH;
+    }
     public int getAutoSizeTextType() { return mAutoSizeType; }
     public void setGravity(int g) {
         if ((g & Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK) == 0) g |= Gravity.START;
@@ -535,7 +608,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
     public ColorStateList getCompoundDrawableTintList() { return mDrawableTint; }
     public void setCompoundDrawableTintMode(PorterDuff.Mode m) { mDrawableTintMode = m; for (Drawable d : mDrawables) if (d != null) d.setTintMode(m); }
     public PorterDuff.Mode getCompoundDrawableTintMode() { return mDrawableTintMode; }
-    /* View's constructor can get here (a tinted background invalidating itself) before this class's fields exist. */
+    /* called from View's constructor too (a tinted background invalidates itself) before this class's fields are set */
     @Override protected boolean verifyDrawable(Drawable who) { if (mDrawables != null) for (Drawable d : mDrawables) if (d == who) return true; return super.verifyDrawable(who); }
     private int dw(int i) { Drawable d = mDrawables[i]; return d == null ? 0 : d.getBounds().width(); }
     private int dh(int i) { Drawable d = mDrawables[i]; return d == null ? 0 : d.getBounds().height(); }
@@ -618,6 +691,7 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
             if (hm == MeasureSpec.AT_MOST) height = Math.min(hsz, height);
         }
         setMeasuredDimension(width, height);
+        autoSizeText(width - padH, height - padV);
     }
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) { super.onSizeChanged(w, h, ow, oh); }
     private int verticalOffset() {
@@ -876,15 +950,6 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
     public boolean extractText(ExtractedTextRequest r, ExtractedText out) { out.text = mText; out.selectionStart = getSelectionStart(); out.selectionEnd = getSelectionEnd(); return true; }
     public void setExtractedText(ExtractedText t) { setText(t.text); }
     public void setTextAppearanceHusk(int r) { setTextAppearance(r); }
-    // ---- generated by tools/compat/genstubs.py: the platform's nested classes this class does not write
-    public static final class InspectionCompanion implements android.view.inspector.InspectionCompanion {
-        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
-        public InspectionCompanion() {}
-        public void mapProperties(android.view.inspector.PropertyMapper p0) {}
-        public void readProperties(android.widget.TextView p0, android.view.inspector.PropertyReader p1) {}
-        public void readProperties(java.lang.Object p0, android.view.inspector.PropertyReader p1) {}
-    }
-    // ---- end of generated nested classes
     // ---- generated by tools/compat/fillmembers.py: the platform's members this class does not write (signatures only)
     private final java.util.HashMap<String, Object> huskFill = new java.util.HashMap<>();
     public static final long BORINGLAYOUT_FALLBACK_LINESPACING = 210923482L;
@@ -909,10 +974,10 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
     protected void encodeProperties(android.view.ViewHierarchyEncoder p0) {}
     public int getAccessibilitySelectionEnd() { return 0; }
     public int getAccessibilitySelectionStart() { return 0; }
-    public int getAutoSizeMaxTextSize() { return 0; }
-    public int getAutoSizeMinTextSize() { return 0; }
-    public int getAutoSizeStepGranularity() { return 0; }
-    public int[] getAutoSizeTextAvailableSizes() { return null; }
+    public int getAutoSizeMaxTextSize() { return Math.round(mAutoMax); }
+    public int getAutoSizeMinTextSize() { return Math.round(mAutoMin); }
+    public int getAutoSizeStepGranularity() { return Math.round(mAutoStep); }
+    public int[] getAutoSizeTextAvailableSizes() { return mAutoSizes != null ? mAutoSizes.clone() : new int[0]; }
     public java.lang.String[] getAutofillHints() { return null; }
     public android.view.autofill.AutofillValue getAutofillValue() { return null; }
     protected int getBottomPaddingOffset() { return 0; }
@@ -1037,4 +1102,13 @@ public class TextView extends View implements ViewTreeObserver.OnPreDrawListener
     public int transformedToOriginal(int p0, int p1) { return 0; }
     public boolean useDynamicLayout() { return false; }
     // ---- end of generated members
+    // ---- generated by tools/compat/genstubs.py: the platform's nested classes this class does not write
+    public static final class InspectionCompanion implements android.view.inspector.InspectionCompanion {
+        private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
+        public InspectionCompanion() {}
+        public void mapProperties(android.view.inspector.PropertyMapper p0) {}
+        public void readProperties(android.widget.TextView p0, android.view.inspector.PropertyReader p1) {}
+        public void readProperties(java.lang.Object p0, android.view.inspector.PropertyReader p1) {}
+    }
+    // ---- end of generated nested classes
 }

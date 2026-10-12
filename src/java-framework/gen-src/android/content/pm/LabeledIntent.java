@@ -17,6 +17,5 @@ public class LabeledIntent extends android.content.Intent {
     public android.graphics.drawable.Drawable loadIcon(android.content.pm.PackageManager p0) { return null; }
     public java.lang.CharSequence loadLabel(android.content.pm.PackageManager p0) { return null; }
     public void readFromParcel(android.os.Parcel p0) {}
-    public void writeToParcel(android.os.Parcel p0, int p1) {}
     LabeledIntent() { this((android.os.Parcel) null); }
 }

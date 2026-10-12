@@ -31,7 +31,6 @@ public final class DynamicsProcessing extends android.media.audiofx.AudioEffect 
     public void setMbcBandAllChannelsTo(int p0, android.media.audiofx.DynamicsProcessing.MbcBand p1) {}
     public void setMbcBandByChannelIndex(int p0, int p1, android.media.audiofx.DynamicsProcessing.MbcBand p2) {}
     public void setMbcByChannelIndex(int p0, android.media.audiofx.DynamicsProcessing.Mbc p1) {}
-    public void setParameterListener(android.media.audiofx.DynamicsProcessing.OnParameterChangeListener p0) { huskProps.put("ParameterListener", p0); }
     public void setPostEqAllChannelsTo(android.media.audiofx.DynamicsProcessing.Eq p0) { huskProps.put("PostEqAllChannelsTo", p0); }
     public void setPostEqBandAllChannelsTo(int p0, android.media.audiofx.DynamicsProcessing.EqBand p1) {}
     public void setPostEqBandByChannelIndex(int p0, int p1, android.media.audiofx.DynamicsProcessing.EqBand p2) {}

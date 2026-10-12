@@ -21,6 +21,15 @@ public final class Web {
     /** status 0: not the app's, the host fetches reason (the real URL); below 0: failed */
     public static native void respond(int call, int status, String reason, String mime, String encoding, String[] headers, byte[] body);
     public static native String[] poll();
+    // the app's own website data (a WebKit data store per package) and its cookies, for CookieManager
+    private static native void app(String packageName);
+    public static native boolean cookieSet(String url, String setCookie);
+    public static native String cookieGet(String url);
+    public static native boolean cookieClear(boolean sessionOnly);
+    public static native boolean cookieAny();
+    private static boolean sApp;
+    /** Before any web view or cookie: which app's data store they are. */
+    public static synchronized void ensureApp() { if (!sApp) { sApp = true; app(Native.packageName()); } }
 
     public static void deliver() {
         String[] ev = poll();

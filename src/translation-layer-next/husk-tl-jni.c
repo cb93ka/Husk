@@ -103,7 +103,7 @@ static tl_jclass *tl_jni_declare_linked(const char *name, const char *super)
     tl_jclass *c = find_class_locked(name);
     if (!c) {
         c = calloc(1, sizeof(*c));
-        snprintf(c->name, sizeof(c->name), "%s", name);
+        c->name = strdup(name);
         uint32_t h = hash_str(name) % NBUCKETS;
         c->next = g_classes[h];
         g_classes[h] = c;
@@ -139,7 +139,7 @@ tl_jclass *tl_jni_class(const char *name)
     pthread_mutex_unlock(&g_lock);
     if (c) { tl_jni_wait_linked(c); return c; }
     /* Not declared: the APK may define it, and its superclass is whatever the DEX says. */
-    char sup[160];
+    char sup[1024];
     const char *s = tl_dexidx_super(name, sup, sizeof(sup));
     return tl_jni_declare(name, s ? s : (strcmp(name, "java/lang/Object") ? "java/lang/Object" : NULL));
 }
@@ -184,7 +184,7 @@ jobj *tl_jni_new_prim_array(char etype, uint32_t len)
 
 jobj *tl_jni_new_obj_array(tl_jclass *elem, uint32_t len)
 {
-    char cn[200];
+    char cn[1024];
     snprintf(cn, sizeof(cn), "[L%s;", elem ? elem->name : "java/lang/Object");
     jobj *o = obj_alloc(TL_K_OBJ_ARRAY, tl_jni_class(cn));
     o->oarr.len = len;
@@ -347,6 +347,20 @@ static tl_jfield *lookup_field(tl_jclass *cls, const char *name, const char *sig
             return f;
         }
         if (!create) return NULL;
+        /* not a field of the class: a detached one, so the object's slots and the class's statics are never reallocated under the
+           interpreter */
+        pthread_mutex_lock(&g_lock);
+        for (int i = 0; i < cls->nfields; i++) {
+            tl_jfield *f = cls->fields[i];
+            if (f->detached && f->is_static == is_static && !strcmp(f->name, name) && !strcmp(f->sig, sig)) { pthread_mutex_unlock(&g_lock); return f; }
+        }
+        tl_jfield *f = calloc(1, sizeof(*f));
+        f->cls = cls; f->name = strdup(name); f->sig = strdup(sig); f->is_static = is_static; f->detached = true;
+        if (cls->nfields == cls->capf) { cls->capf = cls->capf ? cls->capf * 2 : 8; cls->fields = realloc(cls->fields, (size_t)cls->capf * sizeof(*cls->fields)); }
+        cls->fields[cls->nfields++] = f;
+        pthread_mutex_unlock(&g_lock);
+        tl_log_line("jni: %s has no field %s %s: kept apart from its objects", cls->name, name, sig);
+        return f;
     }
     pthread_mutex_lock(&g_lock);
     for (int i = 0; i < cls->nfields; i++) {
@@ -383,7 +397,18 @@ static tl_jfield *lookup_field(tl_jclass *cls, const char *name, const char *sig
 
 static jvalue *field_slot(jobj *o, tl_jfield *f)
 {
+    if (f->detached) return &f->dval;
     if (f->is_static) return &f->cls->statics[f->index];
+    /* an interpreter object's slots are its own: never grown from here */
+    if (tl_dvm) {
+        /* count before array, as the interpreter's writers publish them (dvm_slots_for) */
+        uint32_t n = __atomic_load_n(&o->nfields, __ATOMIC_ACQUIRE);
+        jvalue *sl = __atomic_load_n(&o->fields, __ATOMIC_ACQUIRE);
+        if (sl && f->index < n) return &sl[f->index];
+        if (o->cls && o->cls->dvm) { static __thread jvalue scratch; scratch.j = 0; return &scratch; }
+        jvalue *dvm_grow_slots(jobj *, uint32_t);
+        return &dvm_grow_slots(o, f->index + 8)[f->index];
+    }
     if (f->index >= o->nfields) {
         uint32_t n = f->index + 8;
         o->fields = realloc(o->fields, n * sizeof(jvalue));
@@ -442,12 +467,17 @@ void tl_jni_clear(void) { t_pending = NULL; }
 
 /* --------------------------------------------------------------- calling */
 
+static void jni_ExceptionDescribe(void *env);
 static jvalue g_zero;
 
 static jvalue invoke(jobj *self, tl_jmeth *m, bool nonvirtual, const jvalue *args)
 {
     if (m->dvm && tl_dvm) {
         jvalue r = tl_dvm->invoke(m->dvm, self, nonvirtual, args);
+        if (g_trace >= 3) {
+            tl_log_line("jni: java call %s.%s%s on %p -> %#llx%s", m->cls->name, m->name, m->sig, (void *)self, (unsigned long long)r.j, t_pending ? " (threw)" : "");
+            if (t_pending) jni_ExceptionDescribe(NULL);
+        }
         if (m->retk == 'L' && r.l && ((jobj *)r.l)->kind != TL_K_CLASS) tl_jni_ref(r.l);
         return r;
     }
@@ -505,11 +535,29 @@ static jvalue null_receiver(const tl_jmeth *m)
     tl_jni_throw("java/lang/NullPointerException", msg);
     return g_zero;
 }
+/* String.<init> called on an AllocObject'd String (Dex2C-made natives build strings this way, as new-instance + invoke-direct):
+ * ART makes the string with StringFactory and points every reference to the receiver at the result. References here are the
+ * object itself, so the placeholder becomes that string in place. */
+static bool string_init_in_place(jobj *self, tl_jmeth *m, const jvalue *args)
+{
+    if (!self || self->kind != TL_K_OBJECT || !m->cls || strcmp(m->name, "<init>") || strcmp(m->cls->name, "java/lang/String")) return false;
+    bool dvm_string_init(const char *sig, const jvalue *p, jvalue *ret);
+    jvalue r = {0};
+    if (!dvm_string_init(m->sig, args, &r) || !r.l) return true;           /* the exception is pending */
+    jobj *str = r.l;
+    self->kind = TL_K_STRING; self->cls = str->cls;
+    self->str.utf8 = strdup(str->str.utf8 ? str->str.utf8 : "");
+    self->str.len16 = str->str.len16; self->str.u16 = NULL;
+    if (str->str.u16) { self->str.u16 = malloc((size_t)str->str.len16 * 2 + 2); memcpy(self->str.u16, str->str.u16, (size_t)str->str.len16 * 2); self->str.u16[str->str.len16] = 0; }
+    tl_jni_unref(str);
+    return true;
+}
 static jvalue call_a(int kind, jobj *self, void *mid, const jvalue *args)
 {
     tl_jmeth *m = mid_ok(mid);
     if (!m) return g_zero;
     if (kind != 2 && !self) return null_receiver(m);
+    if (kind != 2 && string_init_in_place(self, m, args)) return g_zero;
     return invoke(kind == 2 ? NULL : self, m, kind == 1, args);
 }
 static jvalue call_va(int kind, jobj *self, void *mid, tl_va_list *ap)
@@ -519,6 +567,7 @@ static jvalue call_va(int kind, jobj *self, void *mid, tl_va_list *ap)
     if (kind != 2 && !self) return null_receiver(m);
     jvalue args[40];
     args_from_va(m, ap, args);
+    if (kind != 2 && string_init_in_place(self, m, args)) return g_zero;
     return invoke(kind == 2 ? NULL : self, m, kind == 1, args);
 }
 
@@ -565,10 +614,12 @@ static jo jni_FindClass(void *env, const char *name)
 
 static jo jni_GetSuperclass(void *env, jo cls) { (void)env; return cls && cls->kind == TL_K_CLASS && cls->klass.jc->super ? cls->klass.jc->super->mirror : NULL; }
 
+bool dvm_assignable(tl_jclass *sub, tl_jclass *sup);
+/* superclasses, interfaces (the interpreter knows a class's) and arrays: Unity asks IsInstanceOf(trustManager, X509TrustManager) */
 static bool assignable(tl_jclass *sub, tl_jclass *sup)
 {
     for (tl_jclass *c = sub; c; c = c->super) if (c == sup) return true;
-    return false;
+    return sub && sup && dvm_assignable(sub, sup);
 }
 static uint8_t jni_IsAssignableFrom(void *env, jo a, jo b) { (void)env; return (a && b && a->kind == TL_K_CLASS && b->kind == TL_K_CLASS) ? assignable(a->klass.jc, b->klass.jc) : 0; }
 static uint8_t jni_IsInstanceOf(void *env, jo obj, jo cls)
@@ -576,13 +627,23 @@ static uint8_t jni_IsInstanceOf(void *env, jo obj, jo cls)
     (void)env;
     if (!obj) return 1;
     if (!cls || cls->kind != TL_K_CLASS) return 0;
-    if (!obj->cls) return 0;
-    return assignable(obj->cls, cls->klass.jc);
+    /* what getClass() says: a class object is a java.lang.Class (Dex2C's check-cast of one asks this) */
+    tl_jclass *dvm_object_class(jobj *o);
+    tl_jclass *oc = dvm_object_class(obj);
+    if (!oc && obj->kind == TL_K_CLASS) oc = tl_jni_class("java/lang/Class");
+    if (!oc) return 0;
+    return assignable(oc, cls->klass.jc);
 }
 
 static int32_t jni_Throw(void *env, jo t) { (void)env; t_pending = t; return 0; }
 static int32_t jni_ThrowNew(void *env, jo cls, const char *msg) { (void)env; tl_jni_throw(cls && cls->kind == TL_K_CLASS ? cls->klass.jc->name : "java/lang/Error", msg); return 0; }
-static jo jni_ExceptionOccurred(void *env) { (void)env; return tl_jni_ref(t_pending); }
+static void jni_ExceptionDescribe(void *env);
+static jo jni_ExceptionOccurred(void *env)
+{
+    static __thread jobj *t_seen;
+    if (t_pending && g_trace >= 1 && t_pending != t_seen) { t_seen = t_pending; jni_ExceptionDescribe(env); }
+    return tl_jni_ref(t_pending);
+}
 static void jni_ExceptionDescribe(void *env)
 {
     (void)env;
@@ -590,7 +651,7 @@ static void jni_ExceptionDescribe(void *env)
     jvalue m = tl_jni_get_field(t_pending, "detailMessage", "Ljava/lang/String;");
     tl_log_line("jni: pending exception %s: %s", t_pending->cls->name, tl_jni_string(m.l) ? tl_jni_string(m.l) : "");
 }
-static void jni_ExceptionClear(void *env) { (void)env; t_pending = NULL; }
+static void jni_ExceptionClear(void *env) { if (t_pending && g_trace >= 2) { tl_log_line("jni: ExceptionClear of:"); jni_ExceptionDescribe(env); } t_pending = NULL; }
 static void jni_FatalError(void *env, const char *msg) { (void)env; tl_log_line("jni: FatalError: %s", msg); abort(); }
 static int32_t jni_PushLocalFrame(void *env, int32_t cap) { (void)env; (void)cap; return 0; }
 static jo jni_PopLocalFrame(void *env, jo r) { (void)env; return r; }
@@ -679,6 +740,13 @@ static jo new_object(jo cls, void *mid, int how, const jvalue *a, tl_va_list *ap
         jvalue args[40];
         if (how == 1) args_from_va(m, ap, args);
         const jvalue *use = how == 1 ? args : a;
+        /* new String(...) through JNI: ART makes it with StringFactory, as bytecode does. */
+        if (cls->klass.jc->dvm && !strcmp(cls->klass.jc->name, "java/lang/String") && !strcmp(m->name, "<init>")) {
+            bool dvm_string_init(const char *sig, const jvalue *p, jvalue *ret);
+            jvalue r = {0};
+            tl_jni_unref(o);
+            return dvm_string_init(m->sig, use, &r) ? r.l : NULL;
+        }
         jvalue r = invoke(o, m, true, use);
         /* A constructor can stand in for the object it was given: String is not an ordinary object. */
         if (r.l && ((jobj *)r.l)->kind != TL_K_OBJECT) { tl_jni_unref(o); return r.l; }
@@ -701,7 +769,7 @@ static void *jni_GetFieldID_impl(jo cls, const char *name, const char *sig, bool
         tl_jni_throw("java/lang/NullPointerException", "class is null");
         return NULL;
     }
-    char real[200];
+    char real[1024];
     bool mismatch = dex_field_real_sig(cls->klass.jc, name, real, sizeof(real)) && strcmp(real, sig) != 0;
     tl_jfield *f = mismatch ? NULL : lookup_field(cls->klass.jc, name, sig, is_static, false);
     TRACE("jni: Get%sFieldID(%s, %s %s) -> %s", is_static ? "Static" : "", cls->klass.jc->name, name, sig, f ? "ok" : "NOT FOUND");
@@ -741,7 +809,7 @@ jobj *tl_jni_reflect_field(jobj *cls, const char *name, const char *sig, bool is
 {
     if (!cls || cls->kind != TL_K_CLASS) return NULL;
     /* The real helper finds a field by name; Unity passes "Ljava/lang/Object;" for any object-typed field. */
-    char real[200];
+    char real[1024];
     if (dex_field_real_sig(cls->klass.jc, name, real, sizeof(real)) && strcmp(real, sig) != 0
         && (real[0] == 'L' || real[0] == '[') && (sig[0] == 'L' || sig[0] == '['))
         sig = real;
@@ -798,9 +866,22 @@ const char *tl_jni_reflected_sig(const jobj *member)
     return !strcmp(member->cls->name, "java/lang/reflect/Field") ? ((const tl_jfield *)member->native)->sig : ((const tl_jmeth *)member->native)->sig;
 }
 
+/* With the Java runtime up, Method/Constructor/Field objects are its own (Class.getMethod and the like): their interpreter member
+ * is turned into the JNI id for it, and ids back into its objects */
+struct dvm_method; struct dvm_field;
+struct dvm_method *dvm_method_of_reflect(jo exe);
+jo dvm_make_executable(struct dvm_method *m);
+jo dvm_make_field_object(struct dvm_field *f);
+bool dvm_member_info(const void *member, bool field, tl_jclass **cls, const char **name, const char **sig, bool *is_static);
+void *dvm_field_of_jfield(tl_jclass *cls, const char *name, bool is_static);
 static void *jni_FromReflectedMethod(void *env, jo m)
 {
     (void)env;
+    if (tl_dvm && m && m->kind == TL_K_OBJECT) {
+        struct dvm_method *dm = dvm_method_of_reflect(m);
+        tl_jclass *c; const char *n, *sg; bool st;
+        if (dm && dvm_member_info(dm, false, &c, &n, &sg, &st)) return lookup_method(c, n, sg, st);
+    }
     if (!m || !m->native) { TRACE("jni: FromReflectedMethod(%s) -> NPE", m ? "no member" : "NULL"); tl_jni_throw("java/lang/NullPointerException", "reflected method is null"); return NULL; }
     TRACE("jni: FromReflectedMethod -> %s.%s%s", ((tl_jmeth *)m->native)->cls->name, ((tl_jmeth *)m->native)->name, ((tl_jmeth *)m->native)->sig);
     return m->native;
@@ -808,6 +889,10 @@ static void *jni_FromReflectedMethod(void *env, jo m)
 static void *jni_FromReflectedField(void *env, jo f)
 {
     (void)env;
+    if (tl_dvm && f && f->native && f->kind == TL_K_OBJECT && f->cls && f->cls->dvm) {
+        tl_jclass *c; const char *n, *sg; bool st;
+        if (dvm_member_info(f->native, true, &c, &n, &sg, &st)) return lookup_field(c, n, sg, st, true);
+    }
     if (!f || !f->native) { tl_jni_throw("java/lang/NullPointerException", "reflected field is null"); return NULL; }
     return f->native;
 }
@@ -815,11 +900,17 @@ static jo jni_ToReflectedMethod(void *env, jo cls, void *mid, uint8_t is_static)
 {
     (void)env; (void)cls; (void)is_static;
     tl_jmeth *m = mid;
+    if (tl_dvm && m && m->dvm) return dvm_make_executable(m->dvm);
     return m ? reflected(!strcmp(m->name, "<init>") ? "java/lang/reflect/Constructor" : "java/lang/reflect/Method", m) : NULL;
 }
 static jo jni_ToReflectedField(void *env, jo cls, void *fid, uint8_t is_static)
 {
     (void)env; (void)cls; (void)is_static;
+    if (tl_dvm && fid) {
+        tl_jfield *f = fid;
+        void *df = dvm_field_of_jfield(f->cls, f->name, f->is_static);
+        if (df) return dvm_make_field_object(df);
+    }
     return fid ? reflected("java/lang/reflect/Field", fid) : NULL;
 }
 
@@ -966,9 +1057,15 @@ static int32_t jni_RegisterNatives(void *env, jo cls, const native_method *m, in
 {
     (void)env;
     if (!cls || cls->kind != TL_K_CLASS) return -1;
-    tl_jclass *c = cls->klass.jc;
+    tl_jclass *given = cls->klass.jc;
+    bool tl_dvm_declares(tl_jclass *jc, const char *name, const char *sig);
     pthread_mutex_lock(&g_lock);
     for (int32_t i = 0; i < n; i++) {
+        /* the class that declares the method, the given one or a superclass (ART's FindClassMethod): Reanimated registers
+           NativeProxyCommon's natives through its subclass NativeProxy */
+        tl_jclass *c = given;
+        if (!tl_dvm_declares(c, m[i].name, m[i].sig))
+            for (tl_jclass *k = given->super; k; k = k->super) if (tl_dvm_declares(k, m[i].name, m[i].sig)) { c = k; break; }
         c->natives = realloc(c->natives, (size_t)(c->nnatives + 1) * sizeof(*c->natives));
         c->natives[c->nnatives].name = strdup(m[i].name);
         c->natives[c->nnatives].sig = strdup(m[i].sig);
@@ -1075,7 +1172,12 @@ static void build_tables(void)
     g_vm.functions = g_vm_fns;
 }
 
-static uint8_t jni_ExceptionCheck(void *env) { (void)env; return t_pending != NULL; }
+static uint8_t jni_ExceptionCheck(void *env)
+{
+    static __thread jobj *t_seen;
+    if (t_pending && g_trace >= 1 && t_pending != t_seen) { t_seen = t_pending; jni_ExceptionDescribe(env); }
+    return t_pending != NULL;
+}
 
 void tl_jni_init(void)
 {
@@ -1091,11 +1193,16 @@ tl_jfield *tl_jni_field(tl_jclass *cls, const char *name, const char *sig, bool 
 jvalue *tl_jni_field_slot(jobj *o, tl_jfield *f) { return field_slot(o, f); }
 void tl_jni_each_declared(void (*fn)(tl_jclass *jc))
 {
-    tl_jclass *list[8192]; int n = 0;
+    int cap = 8192, n = 0;
+    tl_jclass **list = malloc((size_t)cap * sizeof(*list));
     pthread_mutex_lock(&g_lock);
-    for (int b = 0; b < NBUCKETS; b++) for (tl_jclass *c = g_classes[b]; c && n < 8192; c = c->next) list[n++] = c;
+    for (int b = 0; b < NBUCKETS; b++) for (tl_jclass *c = g_classes[b]; c; c = c->next) {
+        if (n == cap) { cap *= 2; list = realloc(list, (size_t)cap * sizeof(*list)); }
+        list[n++] = c;
+    }
     pthread_mutex_unlock(&g_lock);
     for (int i = 0; i < n; i++) fn(list[i]);
+    free(list);
 }
 
 tl_jclass *tl_jni_find_declared(const char *name)

@@ -129,6 +129,8 @@ public final class Bitmap implements android.os.Parcelable {
         if (!b.isDirect()) return 0;
         try { if (sAddress == null) { sAddress = java.nio.Buffer.class.getDeclaredField("address"); sAddress.setAccessible(true); } return sAddress.getLong(b); } catch (Exception e) { return 0; }
     }
+    /** Husk: premultiplied RGBA rows (top first) from native memory as the pixels. */
+    public void huskSetRgba(long addr) { if (addr != 0) { husk.Gfx.bmRaw(mNative, addr, true); mGeneration++; } }
     /** Husk: the raw (premultiplied RGBA, top row first) pixels into a buffer at its position. */
     public void huskCopyRgba(java.nio.ByteBuffer dst) {
         long a = huskAddress(dst);
@@ -152,6 +154,14 @@ public final class Bitmap implements android.os.Parcelable {
         if (b != null) b.put(tmp); else if (dst instanceof java.nio.IntBuffer) { java.nio.ByteBuffer.wrap(tmp).order(java.nio.ByteOrder.nativeOrder()).asIntBuffer().get(new int[0]); }
     }
     public void copyPixelsFromBuffer(java.nio.Buffer src) {
+        long addr = huskAddress(src);
+        int unit = src instanceof java.nio.ByteBuffer ? 1 : src instanceof java.nio.ShortBuffer ? 2 : 4;
+        if (addr != 0 && getConfig() != Config.RGB_565 && src.remaining() * unit >= mWidth * mHeight * 4) {
+            husk.Gfx.bmRaw(mNative, addr + (long) src.position() * unit, true);
+            src.position(src.position() + mWidth * mHeight * 4 / unit);
+            mGeneration++;
+            return;
+        }
         if (!(src instanceof java.nio.ByteBuffer)) return;
         java.nio.ByteBuffer b = (java.nio.ByteBuffer) src;
         int[] px = new int[mWidth * mHeight];

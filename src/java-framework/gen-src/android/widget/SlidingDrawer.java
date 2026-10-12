@@ -13,18 +13,12 @@ public class SlidingDrawer extends android.view.ViewGroup {
     public void animateOpen() {}
     public void animateToggle() {}
     public void close() {}
-    public void dispatchDraw(android.graphics.Canvas p0) {}
-    public java.lang.CharSequence getAccessibilityClassName() { return (java.lang.CharSequence) huskProps.get("AccessibilityClassName"); }
     public android.view.View getContent() { return (android.view.View) huskProps.get("Content"); }
     public android.view.View getHandle() { return (android.view.View) huskProps.get("Handle"); }
     public boolean isMoving() { return (huskProps.get("Moving") instanceof Boolean ? (Boolean) huskProps.get("Moving") : false); }
     public boolean isOpened() { return (huskProps.get("Opened") instanceof Boolean ? (Boolean) huskProps.get("Opened") : false); }
     public void lock() {}
-    public void onFinishInflate() {}
-    public boolean onInterceptTouchEvent(android.view.MotionEvent p0) { return false; }
     public void onLayout(boolean p0, int p1, int p2, int p3, int p4) {}
-    public void onMeasure(int p0, int p1) {}
-    public boolean onTouchEvent(android.view.MotionEvent p0) { return false; }
     public void open() {}
     public void setOnDrawerCloseListener(android.widget.SlidingDrawer.OnDrawerCloseListener p0) { huskProps.put("OnDrawerCloseListener", p0); }
     public void setOnDrawerOpenListener(android.widget.SlidingDrawer.OnDrawerOpenListener p0) { huskProps.put("OnDrawerOpenListener", p0); }

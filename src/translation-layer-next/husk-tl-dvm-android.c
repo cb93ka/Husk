@@ -192,7 +192,8 @@ NAT(N_log)
 /* Assets: the app's APK first, then its splits and asset packs (a Play install keeps a game's data in an install-time asset pack). */
 static const tl_zip_entry *asset_find(const char *n, const tl_zip **zout)
 {
-    char path[1024]; snprintf(path, sizeof(path), "assets/%s", n ? n : "");
+    /* "/lib/x.so": a file from the APK's root (openNonAssetFd), which asset names never start with */
+    char path[1024]; if (n && n[0] == '/') snprintf(path, sizeof(path), "%s", n + 1); else snprintf(path, sizeof(path), "assets/%s", n ? n : "");
     for (int i = 0; i < 16; i++) {
         const tl_zip *z = tl_ld_apk_at(i);
         if (!z) { if (i == 0) continue; break; }
@@ -307,6 +308,33 @@ static const tl_zip *apk_n(int n, const char **path)
     }
     return tl_ld_apk_at(n - 1);
 }
+const char *tl_ld_queued_split(int i);
+void dvm_set_app_loader(jobj *loader);
+NAT(N_setAppClassLoader) { (void)self; (void)ret; dvm_set_app_loader(a[0].l); return true; }
+/* The NDK's ALooper for a Java Looper's thread: native code that asks for its UI thread's looper (ALooper_forThread) and watches
+ * file descriptors on it (Unity 6, GameActivity-style code) has its callbacks run between that thread's messages */
+NAT(N_looperPrepare) { (void)self; (void)a; (void)ret; void *(*prep)(int) = tl_bionic_find("ALooper_prepare"); if (prep) prep(0); return true; }
+NAT(N_looperPoll)
+{
+    (void)self; (void)a;
+    ret->j = 0;
+    void *(*cur)(void) = tl_bionic_find("ALooper_forThread");
+    int (*poll_all)(int, int *, int *, void **) = tl_bionic_find("ALooper_pollAll");
+    if (cur && poll_all && cur()) { poll_all(0, NULL, NULL, NULL); ret->z = true; }
+    return true;
+}
+NAT(N_splitPaths)
+{
+    (void)self; (void)a;
+    int n = 0;
+    while (n < 16 && tl_ld_queued_split(n)) n++;
+    jobj *arr = tl_jni_new_obj_array(tl_jni_class("java/lang/String"), (uint32_t)n);
+    arr->cls = tl_jni_class("[Ljava/lang/String;");
+    arr->refs = 1u << 30;
+    for (int i = 0; i < n; i++) arr->oarr.v[i] = jstr(tl_ld_queued_split(i));
+    *ret = L(arr);
+    return true;
+}
 NAT(N_readApkFile)
 {
     (void)self;
@@ -409,11 +437,13 @@ NAT(N_insets)
 static void *gl_main(void *arg);
 NAT(N_startGL)
 {
+    void tl_thread_altstack(void); tl_thread_altstack();
     (void)self; (void)ret;
     if (A.gl_started) return true;
     A.gl_version = a[2].i; A.gl_view = a[0].l;
     A.gl_started = true;
-    A.gl_renderer = a[1].l;                 /* the render thread picks it up */
+    /* the render thread picks it up; released after the version and view, so it never sees the renderer without them */
+    __atomic_store_n(&A.gl_renderer, a[1].l, __ATOMIC_RELEASE);
     return true;
 }
 
@@ -438,6 +468,10 @@ static const struct { const char *name, *sig; dvm_native_fn fn; } k_native[] = {
     { "exit", "()V", N_exit },
     { "uptimeNanos", "()J", N_uptimeNanos },
     { "readApkFile", "(ILjava/lang/String;)[B", N_readApkFile },
+    { "splitPaths", "()[Ljava/lang/String;", N_splitPaths },
+    { "nativeLooperPrepare", "()V", N_looperPrepare },
+    { "nativeLooperPoll", "()Z", N_looperPoll },
+    { "setAppClassLoader", "(Ljava/lang/ClassLoader;)V", N_setAppClassLoader },
     { "apkFileFd", "(ILjava/lang/String;)J", N_apkFileFd },
     { "apkFileLength", "(ILjava/lang/String;)J", N_apkFileLength },
     { "apkPath", "()Ljava/lang/String;", N_apkPath },
@@ -458,11 +492,13 @@ dvm_native_fn tl_gfx_native(const char *name, const char *sig);
 dvm_native_fn tl_audio_native(const char *name, const char *sig);
 dvm_native_fn tl_sensors_native(const char *name, const char *sig);
 dvm_native_fn tl_sqlite_native(const char *name, const char *sig);
+dvm_native_fn tl_media_native(const char *name, const char *sig);
 dvm_native_fn tl_web_native(const char *name, const char *sig);
 bool tl_web_any_visible(void);
 dvm_native_fn dvm_android_native(const char *cls, const char *name, const char *sig)
 {
     if (!strcmp(cls, "husk/Sqlite")) return tl_sqlite_native(name, sig);
+    if (!strcmp(cls, "husk/MediaCodecNative")) return tl_media_native(name, sig);
     if (!strcmp(cls, "husk/Web")) return tl_web_native(name, sig);
     if (!strcmp(cls, "husk/Sensors")) return tl_sensors_native(name, sig);
     if (!strcmp(cls, "husk/Gfx")) return tl_gfx_native(name, sig);
@@ -761,78 +797,6 @@ NAT(EN_swap)
     ret->z = true;
     return true;
 }
-/* ---- the same for native EGL (an engine that makes its context and window surface in C++: Qt)
- *
- * Its window surface on a SurfaceView's ANativeWindow is a pbuffer; eglSwapBuffers hands the frame to the render thread like
- * EN_swap, so the app's views and dialogs (an ad SDK's consent dialog) are drawn over it rather than hidden under frames that went
- * straight to the screen. Its contexts share the render thread's objects; one that cannot share has its frames read back. */
-static struct { EGLSurface pb; app_surf s; } g_nat[8];
-static bool g_nat_readback;
-bool tl_javaapp_composites(void) { return E2.ready; }
-void *tl_javaapp_share_context(void) { return E2.ready ? E2.ui : NULL; }
-void tl_javaapp_native_context_made(bool shared) { if (!shared) g_nat_readback = true; }
-void tl_javaapp_native_surface(void *pb, int w, int h)
-{
-    pthread_mutex_lock(&E2.lk);
-    for (int i = 0; i < 8; i++) if (!g_nat[i].pb || g_nat[i].pb == pb) { memset(&g_nat[i], 0, sizeof(g_nat[i])); g_nat[i].pb = pb; g_nat[i].s.pb = pb; g_nat[i].s.w = w; g_nat[i].s.h = h; break; }
-    pthread_mutex_unlock(&E2.lk);
-}
-bool tl_javaapp_native_swap(void *pb)
-{
-    app_surf *s = NULL;
-    for (int i = 0; i < 8; i++) if (g_nat[i].pb == pb) { s = &g_nat[i].s; break; }
-    if (!s) return false;
-    void (*getIntegerv)(uint32_t, int32_t *) = gl_fn("glGetIntegerv");
-    void (*bindTex)(uint32_t, uint32_t) = gl_fn("glBindTexture");
-    void (*activeTex)(uint32_t) = gl_fn("glActiveTexture");
-    void (*genTex)(int32_t, uint32_t *) = gl_fn("glGenTextures");
-    void (*texParam)(uint32_t, uint32_t, int32_t) = gl_fn("glTexParameteri");
-    void (*copyTex)(uint32_t, int32_t, uint32_t, int32_t, int32_t, int32_t, int32_t, int32_t) = gl_fn("glCopyTexImage2D");
-    void (*copyTexSub)(uint32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t) = gl_fn("glCopyTexSubImage2D");
-    void (*bindFb)(uint32_t, uint32_t) = gl_fn("glBindFramebuffer");
-    void (*readPixels)(int32_t, int32_t, int32_t, int32_t, uint32_t, uint32_t, void *) = gl_fn("glReadPixels");
-    void (*pixelStore)(uint32_t, int32_t) = gl_fn("glPixelStorei");
-    void (*finish)(void) = gl_fn("glFinish");
-    int32_t fb = 0, active = 0x84C0, tex = 0, pack = 4;
-    getIntegerv(0x8CA6, &fb);
-    getIntegerv(0x84E0, &active);
-    if (fb) bindFb(0x8D40, 0);
-    if (g_nat_readback) {
-        getIntegerv(0x0D05, &pack);
-        s->px = realloc(s->px, (size_t)s->w * s->h * 4);
-        pixelStore(0x0D05, 4);
-        readPixels(0, 0, s->w, s->h, 0x1908, 0x1401, s->px);
-        pixelStore(0x0D05, pack);
-        pthread_mutex_lock(&E2.lk);
-        E2.px = realloc(E2.px, (size_t)s->w * s->h * 4);
-        memcpy(E2.px, s->px, (size_t)s->w * s->h * 4);
-        E2.tex = 0;
-    } else {
-        activeTex(0x84C0);
-        getIntegerv(0x8069, &tex);
-        int k = s->cur;
-        if (!s->tex[k]) genTex(1, &s->tex[k]);
-        bindTex(0x0DE1, s->tex[k]);
-        if (s->tw[k] != s->w || s->th[k] != s->h) {
-            texParam(0x0DE1, 0x2801, 0x2601); texParam(0x0DE1, 0x2800, 0x2601);
-            texParam(0x0DE1, 0x2802, 0x812F); texParam(0x0DE1, 0x2803, 0x812F);
-            copyTex(0x0DE1, 0, 0x1908, 0, 0, s->w, s->h, 0);
-            s->tw[k] = s->w; s->th[k] = s->h;
-        } else copyTexSub(0x0DE1, 0, 0, 0, 0, 0, s->w, s->h);
-        bindTex(0x0DE1, (uint32_t)tex);
-        activeTex((uint32_t)active);
-        finish();
-        s->cur ^= 1;
-        pthread_mutex_lock(&E2.lk);
-        E2.tex = s->tex[k];
-    }
-    E2.pw = s->w; E2.ph = s->h;
-    E2.x = 0; E2.y = 0; E2.w = s->w; E2.h = s->h;           /* the engine's window fills the screen */
-    E2.on = true; E2.seq++;
-    pthread_mutex_unlock(&E2.lk);
-    if (fb) bindFb(0x8D40, (uint32_t)fb);
-    return true;
-}
 
 /* the GL thread Husk drives GLSurfaceView from: there EGL10 answers for the context it made */
 static pthread_t g_render_thread;
@@ -878,6 +842,20 @@ static void app_frame_draw(overlay *o, overlay *up, int vw, int vh)
     enableAttr(0);
     draw(0x0005, 0, 4);
     viewport(0, 0, vw, vh);
+}
+/* For EGL: whether this runtime's compositor holds the screen, and an app's own EGL window's frame for it (NULL: no longer shown) */
+bool tl_javaapp_compositing(void) { pthread_mutex_lock(&E2.lk); bool r = E2.ready; pthread_mutex_unlock(&E2.lk); return r; }
+void tl_javaapp_app_pixels(const void *px, int w, int h)
+{
+    pthread_mutex_lock(&E2.lk);
+    if (!px) { E2.on = false; E2.seq++; pthread_mutex_unlock(&E2.lk); return; }
+    size_t n = (size_t)w * h * 4;
+    if (E2.pw != w || E2.ph != h || !E2.px) E2.px = realloc(E2.px, n);
+    if (E2.px) memcpy(E2.px, px, n);
+    E2.pw = w; E2.ph = h; E2.tex = 0;
+    E2.x = 0; E2.y = 0; E2.w = A.cfg.width; E2.h = A.cfg.height;
+    E2.on = true; E2.seq++;
+    pthread_mutex_unlock(&E2.lk);
 }
 static uint64_t app_frame_seq(void) { pthread_mutex_lock(&E2.lk); uint64_t q = E2.seq; pthread_mutex_unlock(&E2.lk); return q; }
 static bool app_frame_on(void) { pthread_mutex_lock(&E2.lk); bool q = E2.on; pthread_mutex_unlock(&E2.lk); return q; }
@@ -935,7 +913,7 @@ static void *gl_main(void *arg)
         if (atomic_load(&A.paused)) { usleep(20000); next = now_ns(); continue; }
         bool drew = false;
         /* the app's renderer, once its GLSurfaceView is on screen */
-        if (A.gl_renderer && !app) {
+        if (__atomic_load_n(&A.gl_renderer, __ATOMIC_ACQUIRE) && !app) {
             /* GLSurfaceView's default is OpenGL ES 1 (fixed function, through ANGLE's ES1 front end); 2 and 3 as asked */
             int es = A.gl_version >= 3 && es3 ? 3 : A.gl_version <= 1 ? 1 : 2;
             const EGLint attr[] = { 0x3098, es, EGL_NONE };
@@ -1037,10 +1015,12 @@ bool tl_javaapp_manifest(const char *apk, char *pkg, size_t pn, char *activity, 
     if (application && apn) application[0] = 0;
     if (e && tl_zip_data(&z, e, 8u << 20, &d, &len, &owned, err, sizeof(err)) && len > 8 && rd16le(d) == 0x0003) {
         const uint8_t *pool = NULL; size_t psz = 0;
+        const uint8_t *resmap = NULL; uint32_t nres = 0;              /* string index -> attribute resource id */
         for (size_t off = rd16le(d + 2); off + 8 <= len; ) {
             uint16_t type = rd16le(d + off); uint32_t size = rd32le(d + off + 4);
             if (size < 8 || off + size > len) break;
             if (type == 0x0001) { pool = d + off; psz = size; }
+            else if (type == 0x0180) { resmap = d + off + rd16le(d + off + 2); nres = (size - rd16le(d + off + 2)) / 4; }
             else if (type == 0x0102 && pool && size >= 36) {
                 const uint8_t *el = d + off;
                 char name[64] = "";
@@ -1049,7 +1029,13 @@ bool tl_javaapp_manifest(const char *apk, char *pkg, size_t pn, char *activity, 
                 for (unsigned i = 0; i < acount; i++) {
                     const uint8_t *at = el + 16 + astart + (size_t)i * asize;
                     char an2[64] = "", av[260] = "";
-                    if (!pool_str(pool, psz, rd32le(at + 4), an2, sizeof(an2))) continue;
+                    uint32_t ni = rd32le(at + 4);
+                    if (!pool_str(pool, psz, ni, an2, sizeof(an2))) continue;
+                    /* a shrunk manifest keeps only the attribute's resource id (PayPal's): name and targetActivity by id */
+                    if (!an2[0] && resmap && ni < nres) {
+                        uint32_t id = rd32le(resmap + 4 * ni);
+                        if (id == 0x01010003) snprintf(an2, sizeof(an2), "name"); else if (id == 0x01010202) snprintf(an2, sizeof(an2), "targetActivity");
+                    }
                     if (rd32le(at + 8) != 0xFFFFFFFFu) pool_str(pool, psz, rd32le(at + 8), av, sizeof(av));
                     if (!strcmp(name, "manifest") && !strcmp(an2, "package")) snprintf(pkg, pn, "%s", av);
                     if (!strcmp(name, "application") && !strcmp(an2, "name")) snprintf(app, sizeof(app), "%s", av);
@@ -1097,6 +1083,7 @@ static void log_pending_stack(void)
 
 static void *app_main(void *arg)
 {
+    void tl_thread_altstack(void); tl_thread_altstack();
     (void)arg;
     pthread_setname_np("main");
     jvalue a[2] = { L(dvm_new_string_utf8(A.activity)), L(A.application[0] ? dvm_new_string_utf8(A.application) : NULL) };
@@ -1147,10 +1134,26 @@ static void qt_unpack_plugins(const char *apk, const char *data)
     if (n) tl_log_line("javaapp: %d Qt plugins put in %s", n, dir);
 }
 
+/* An empty file in the native library directory for each library the APKs carry: ClassLoader.findLibrary() and File.exists() checks
+ * find it (Unity asks the class loader where libil2cpp is), while loading still takes the library from the APK by its name. */
+static void stub_lib(const char *name, uint64_t size, void *dir)
+{
+    (void)size;
+    char p[1400]; snprintf(p, sizeof(p), "%s/%s", (const char *)dir, name);
+    struct stat st;
+    if (stat(p, &st) != 0) { int fd = open(p, O_CREAT | O_WRONLY, 0755); if (fd >= 0) close(fd); }
+}
+
 bool tl_javaapp_start(const tl_javaapp_config *cfg)
 {
+    /* stores into a library's executable view (data sharing a page with its code, as Unity's does) go through the writable one */
+    { void tl_codewrite_enable(void); tl_codewrite_enable(); }
     A.cfg = *cfg;
     snprintf(A.apk, sizeof(A.apk), "%s", cfg->apk_path);
+    /* an app whose manifest needs OpenGL ES 3.1 or 3.2 is told the driver has it (ANGLE over Metal stops at 3.0; the shim writes
+       its 310/320 es shaders down), as it would otherwise refuse to start */
+    { int tl_manifest_gles(const char *); void tl_egl_es3_claim(int); int gv = tl_manifest_gles(cfg->apk_path);
+      if (gv >= 0x30001) { tl_egl_es3_claim(gv & 0xffff); tl_log_line("egl: the manifest asks for OpenGL ES 3.%d: the driver is described so", gv & 0xffff); } }
     snprintf(A.data, sizeof(A.data), "%s", cfg->data_dir);
     snprintf(A.ext, sizeof(A.ext), "%s/sdcard", cfg->data_dir);
     snprintf(A.fwres, sizeof(A.fwres), "%s", cfg->framework_res ? cfg->framework_res : "");
@@ -1164,8 +1167,13 @@ bool tl_javaapp_start(const tl_javaapp_config *cfg)
     tl_log_line("javaapp: %s, launcher %s, application %s", A.pkg, A.activity, A.application[0] ? A.application : "(none)");
     tl_nwindow_configure(cfg->width, cfg->height, cfg->metal_layer);
     if (cfg->angle_egl && !tl_egl_init(cfg->angle_egl, cfg->angle_gles, cfg->frame_dir, cfg->frame_every)) return false;
+    { void tl_set_data_dir(const char *dir); tl_set_data_dir(cfg->data_dir); }
+    /* the environment every Android process starts with (TrustedCertificateStore builds paths from ANDROID_DATA) */
+    setenv("ANDROID_DATA", "/data", 0); setenv("ANDROID_ROOT", "/system", 0); setenv("ANDROID_STORAGE", "/storage", 0);
+    setenv("EXTERNAL_STORAGE", "/sdcard", 0); setenv("ANDROID_ASSETS", "/system/app", 0); setenv("BOOTCLASSPATH", "", 0);
     if (!tl_ld_add_apk(cfg->apk_path)) return false;
     if (!tl_dvm_add_apk(cfg->apk_path)) return false;
+    { char lib[1100]; snprintf(lib, sizeof(lib), "%s/lib", A.data); mkdir(lib, 0755); tl_ld_apk_libs(stub_lib, lib); }
     /* Qt: its regular expressions (PCRE2) and QML's JavaScript engine compile to machine code in memory they map executable, which
      * a guest cannot have (the mapping comes back writable only, and the first call into it is a bus error). Qt's own switches turn
      * both to their interpreters. */

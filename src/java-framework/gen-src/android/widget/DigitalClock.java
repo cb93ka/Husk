@@ -6,7 +6,6 @@ public class DigitalClock extends android.widget.TextView {
     private final java.util.HashMap<String, Object> huskProps = new java.util.HashMap<>();
     public DigitalClock(android.content.Context p0) { super(p0); }
     public DigitalClock(android.content.Context p0, android.util.AttributeSet p1) { super(p0, p1); }
-    public java.lang.CharSequence getAccessibilityClassName() { return (java.lang.CharSequence) huskProps.get("AccessibilityClassName"); }
     public void onAttachedToWindow() {}
     public void onDetachedFromWindow() {}
     DigitalClock() { this((android.content.Context) null); }

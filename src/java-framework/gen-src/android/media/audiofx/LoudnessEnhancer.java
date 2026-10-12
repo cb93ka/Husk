@@ -9,7 +9,6 @@ public class LoudnessEnhancer extends android.media.audiofx.AudioEffect {
     public LoudnessEnhancer(int p0, int p1) { super((java.util.UUID) null, (android.media.AudioDeviceAttributes) null); }
     public android.media.audiofx.LoudnessEnhancer.Settings getProperties() { return (android.media.audiofx.LoudnessEnhancer.Settings) huskProps.get("Properties"); }
     public float getTargetGain() { return (huskProps.get("TargetGain") instanceof Float ? (Float) huskProps.get("TargetGain") : 0f); }
-    public void setParameterListener(android.media.audiofx.LoudnessEnhancer.OnParameterChangeListener p0) { huskProps.put("ParameterListener", p0); }
     public void setProperties(android.media.audiofx.LoudnessEnhancer.Settings p0) { huskProps.put("Properties", p0); }
     public void setTargetGain(int p0) { huskProps.put("TargetGain", Integer.valueOf(p0)); }
     LoudnessEnhancer() { this((int) 0); }

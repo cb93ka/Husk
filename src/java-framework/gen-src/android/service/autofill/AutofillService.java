@@ -15,7 +15,6 @@ public abstract class AutofillService extends android.app.Service {
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
     public void onConnected() {}
     public void onConvertCredentialRequest(android.service.autofill.ConvertCredentialRequest p0, android.service.autofill.ConvertCredentialCallback p1) {}
-    public void onCreate() {}
     public void onDisconnected() {}
     public void onFillCredentialRequest(android.service.autofill.FillRequest p0, android.os.CancellationSignal p1, android.service.autofill.FillCallback p2, android.os.IBinder p3) {}
     public abstract void onFillRequest(android.service.autofill.FillRequest p0, android.os.CancellationSignal p1, android.service.autofill.FillCallback p2);

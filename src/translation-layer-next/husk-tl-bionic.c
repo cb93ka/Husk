@@ -171,6 +171,14 @@ static int bionic___system_property_read(const void *pi, char *name, char *value
     return (int)strlen(p->v);
 }
 
+/* __system_property_foreach: each property Husk answers, as a find() handle */
+static int bionic___system_property_foreach(void (*fn)(const void *pi, void *cookie), void *cookie)
+{
+    if (!fn) return -1;
+    for (size_t i = 0; i < sizeof(k_props) / sizeof(k_props[0]); i++) fn(&k_props[i], cookie);
+    return 0;
+}
+
 int tl_dns_servers(char out[][64], int max);
 
 static int bionic___system_property_get(const char *name, char *value)
@@ -188,6 +196,17 @@ static int bionic___system_property_get(const char *name, char *value)
     if (!v) { value[0] = 0; return 0; }
     snprintf(value, 92, "%s", v);
     return (int)strlen(value);
+}
+int tl_property_get(const char *name, char *value) { return bionic___system_property_get(name, value); }
+/* every property, as getprop prints them ([name]: [value]) */
+size_t tl_property_list(char *buf, size_t n)
+{
+    size_t o = 0; buf[0] = 0;
+    for (size_t i = 0; i < sizeof(k_props) / sizeof(k_props[0]) && o + 1 < n; i++) {
+        char v[92]; bionic___system_property_get(k_props[i].k, v);
+        o += (size_t)snprintf(buf + o, n - o, "[%s]: [%s]\n", k_props[i].k, v);
+    }
+    return o < n ? o : n - 1;
 }
 
 /* The rest of the property API Android's own libraries use (ART's libbase reads properties through the callback). */
@@ -345,8 +364,23 @@ static void describe_caller(void *lr, char *out, size_t n)
 {
     const char *ln = NULL; const void *sa = NULL;
     const char *sym = tl_ld_symbol_at(lr, &ln, &sa);
-    if (ln) snprintf(out, n, "%s %s+%#lx", ln, sym ? sym : "?", sa ? (unsigned long)((const char *)lr - (const char *)sa) : 0ul);
+    extern void *tl_ld_lib_base(const tl_lib *L);
+    if (ln && sym) snprintf(out, n, "%s %s+%#lx", ln, sym, sa ? (unsigned long)((const char *)lr - (const char *)sa) : 0ul);
+    else if (ln) snprintf(out, n, "%s +%#lx", ln, (unsigned long)((const char *)lr - (const char *)tl_ld_lib_base(tl_ld_lib_of(lr))));
     else snprintf(out, n, "%p", lr);
+}
+/* the guest's frames above an exit or abort, by frame pointer */
+static void log_guest_frames(void *fp)
+{
+    for (int i = 0; i < 16 && fp && ((uintptr_t)fp & 7) == 0; i++) {
+        void **f = fp;
+        void *lr = f[1];
+        if (!lr) break;
+        char where[200]; describe_caller(lr, where, sizeof(where));
+        tl_log_line("bionic:   from %s", where);
+        if (f[0] <= fp) break;
+        fp = f[0];
+    }
 }
 
 static void guest_abort(const char *why)
@@ -373,6 +407,7 @@ static void bionic_exit(int status)
     char where[200];
     describe_caller(__builtin_return_address(0), where, sizeof(where));
     tl_log_line("bionic: exit(%d) called from %s", status, where);
+    log_guest_frames(__builtin_frame_address(1));
     if (tl_guest_exit_hook) tl_guest_exit_hook(status);
     exit(status);
 }
@@ -460,7 +495,9 @@ static void bionic___cxa_finalize(void *dso)
 
 /* -------------------------------------------------------- system queries */
 
-static unsigned long bionic_getauxval(unsigned long type)
+unsigned long tl_bionic_getauxval(unsigned long type);
+static unsigned long bionic_getauxval(unsigned long type) { return tl_bionic_getauxval(type); }
+unsigned long tl_bionic_getauxval(unsigned long type)
 {
     static uint8_t random16[16] = { 0x4a, 0x13, 0x9c, 0x71, 0xe2, 0x05, 0x88, 0x3d, 0xb6, 0x21, 0x5f, 0xc4, 0x90, 0x2e, 0x67, 0xd8 };
     switch (type) {
@@ -571,7 +608,10 @@ static int bionic_waitpid(int pid, int *st, int opt) { (void)pid; (void)st; (voi
 static long bionic_ptrace(int req, int pid, void *addr, void *data) { (void)req; (void)pid; (void)addr; (void)data; tl_set_guest_errno(1); return -1; }
 
 /* A passwd entry like Android's: an app user. */
-static struct { char *pw_name; uint32_t pw_uid, pw_gid; char *pw_dir; char *pw_shell; } g_pwd = { "u0_a1", 10001, 10001, "/data", "/system/bin/sh" };
+/* bionic's LP64 struct passwd: name, passwd, uid, gid, gecos, dir, shell (an app's user, as bionic makes it from the uid) */
+typedef struct { char *pw_name, *pw_passwd; uint32_t pw_uid, pw_gid; char *pw_gecos, *pw_dir, *pw_shell; } guest_passwd;
+static guest_passwd g_pwd = { "u0_a1", NULL, 10001, 10001, NULL, "/data", "/system/bin/sh" };
+const void *tl_bionic_app_passwd(void) { return &g_pwd; }
 static void *bionic_getpwuid(uint32_t uid) { (void)uid; return &g_pwd; }
 static int bionic_getpwuid_r(uint32_t uid, void *pwd, char *buf, size_t n, void **result)
 {
@@ -596,7 +636,12 @@ static void dl_fail(const char *fmt, const char *arg)
     t_dlerr_set = true;
 }
 
-static void *bionic_dlopen(const char *path, int flags)
+static void *dlopen_impl(const char *path, int flags);
+/* __loader_dlopen, which bionic's dlopen calls with its caller: the first call in dlopen's code is to it, as on a phone, because
+ * liblinkernsbypass (GameNative, Turnip loaders) finds __loader_dlopen by walking dlopen's instructions to its first BL */
+__attribute__((noinline)) static void *bionic_loader_dlopen(const char *path, int flags, const void *caller) { (void)caller; return dlopen_impl(path, flags); }
+__attribute__((noinline, disable_tail_calls)) static void *bionic_dlopen(const char *path, int flags) { return bionic_loader_dlopen(path, flags, __builtin_return_address(0)); }
+static void *dlopen_impl(const char *path, int flags)
 {
     if (!path) return &g_sys_handle[0];          /* the global namespace */
     const char *base = strrchr(path, '/');
@@ -634,6 +679,11 @@ static int32_t ssl_init_guard(void *stream, uint8_t server, void *ctx, void *rea
     if (!stream) { tl_note_once("TLS through Java's SSLEngine is not available: .NET HTTPS requests fail"); return 0; }
     return g_ssl_init_real ? g_ssl_init_real(stream, server, ctx, reader, writer, size, host) : 0;
 }
+static void *bionic_dlsym(void *handle, const char *name);
+static void *bionic_loader_android_dlopen_ext(const char *path, int flags, const void *info, const void *caller) { (void)info; (void)caller; return bionic_dlopen(path, flags); }
+static void *bionic_android_dlopen_ext(const char *path, int flags, const void *info) { (void)info; return bionic_dlopen(path, flags); }
+static void *bionic_loader_dlsym(void *handle, const char *name, const void *caller) { (void)caller; return bionic_dlsym(handle, name); }
+static void *bionic_loader_dlvsym(void *handle, const char *name, const char *ver, const void *caller) { (void)ver; (void)caller; return bionic_dlsym(handle, name); }
 
 static void *bionic_dlsym(void *handle, const char *name)
 {
@@ -705,7 +755,7 @@ static char **tl_environ_ptr(void) { return NULL; }
 const tl_bionic_entry tl_tab_core[] = {
     TL_WRAP("__errno", bionic___errno),
     TL_WRAP("__system_property_find", bionic___system_property_find),
-    TL_WRAP("__system_property_read", bionic___system_property_read),
+    TL_WRAP("__system_property_read", bionic___system_property_read), TL_WRAP("__system_property_foreach", bionic___system_property_foreach),
     TL_WRAP("__system_property_get", bionic___system_property_get),
     TL_WRAP("__system_property_read_callback", bionic___system_property_read_callback),
     TL_WRAP("__system_property_serial", bionic___system_property_serial),
@@ -789,6 +839,11 @@ const tl_bionic_entry tl_tab_core[] = {
     TL_WRAP("dlerror", bionic_dlerror),
     TL_WRAP("dladdr", bionic_dladdr),
     TL_WRAP("dl_iterate_phdr", bionic_dl_iterate_phdr),
+    /* libdl's implementation entry points, which Facebook's loader hooks look up by name to call with a caller address */
+    TL_WRAP("android_dlopen_ext", bionic_android_dlopen_ext), TL_WRAP("__loader_dlopen", bionic_loader_dlopen), TL_WRAP("__loader_android_dlopen_ext", bionic_loader_android_dlopen_ext),
+    TL_WRAP("__loader_dlsym", bionic_loader_dlsym), TL_WRAP("__loader_dlvsym", bionic_loader_dlvsym),
+    TL_WRAP("__loader_dlclose", bionic_dlclose), TL_WRAP("__loader_dlerror", bionic_dlerror), TL_WRAP("__loader_dladdr", bionic_dladdr),
+    TL_WRAP("__loader_dl_iterate_phdr", bionic_dl_iterate_phdr),
     TL_END
 };
 
@@ -849,6 +904,8 @@ bool tl_bionic_is_system_lib(const char *soname)
         "libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so", "libEGL.so", "libGLESv1_CM.so",
         "libGLESv2.so", "libGLESv3.so", "libz.so", "libmediandk.so", "libOpenSLES.so", "libaaudio.so",
         "libvulkan.so", "libnativewindow.so", "libjnigraphics.so", "libcamera2ndk.so", "libstdc++.so",
+        /* the rest of the NDK's libraries an app may list as needed without calling much in them (Roblox needs OpenMAX AL) */
+        "libOpenMAXAL.so", "libneuralnetworks.so", "libbinder_ndk.so", "libsync.so", "libamidi.so",
         /* the Java runtime's: answered by Husk (husk-tl-dvm-jvm.c), never loaded */ "libopenjdkjvm.so", "libdl_android.so", "libart.so", NULL };
     for (int i = 0; sys[i]; i++) if (!strcmp(sys[i], soname)) return true;
     return false;

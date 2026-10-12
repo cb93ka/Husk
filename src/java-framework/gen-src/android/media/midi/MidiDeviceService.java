@@ -10,7 +10,6 @@ public abstract class MidiDeviceService extends android.app.Service {
     public android.media.midi.MidiReceiver[] getOutputPortReceivers() { return (android.media.midi.MidiReceiver[]) huskProps.get("OutputPortReceivers"); }
     public android.os.IBinder onBind(android.content.Intent p0) { return null; }
     public void onClose() {}
-    public void onCreate() {}
     public void onDeviceStatusChanged(android.media.midi.MidiDeviceStatus p0) {}
     public abstract android.media.midi.MidiReceiver[] onGetInputPortReceivers();
 }

@@ -122,10 +122,13 @@ static void *native_of(const char *cls, const char *name, const char *sig)
 {
     void *fn = tl_jni_native(cls, name, sig);
     /* A native declared on UnityPlayer is looked up on the player's own class first, and the other way round:
-     * which of the two holds it depends on the Unity version. */
-    if (!fn && U.player_cls && strcmp(U.player_cls, UNITY_PLAYER)) {
-        if (!strcmp(cls, UNITY_PLAYER)) fn = tl_jni_native(U.player_cls, name, sig);
-        else if (!strcmp(cls, U.player_cls)) fn = tl_jni_native(UNITY_PLAYER, name, sig);
+     * which of the two holds it depends on the Unity version (Unity 6 registers the lifecycle natives on the host's class). */
+    if (!fn && !strcmp(cls, UNITY_PLAYER)) {
+        if (U.player_cls && strcmp(U.player_cls, UNITY_PLAYER)) fn = tl_jni_native(U.player_cls, name, sig);
+        if (!fn) fn = tl_jni_native(UNITY_PLAYER_AOS, name, sig);
+        if (!fn) fn = tl_jni_native("com/unity3d/player/UnityPlayerForGameActivity", name, sig);
+    } else if (!fn && U.player_cls && !strcmp(cls, U.player_cls)) {
+        fn = tl_jni_native(UNITY_PLAYER, name, sig);
     }
     if (!fn) tl_log_line("unity: native %s.%s%s was not registered", cls, name, sig);
     return fn;
@@ -333,13 +336,13 @@ static void init_player(void)
     /* The UnityPlayer constructor's last native step before it starts the thread. */
     if (tl_jni_native(UNITY_PLAYER, "initJni", "(Landroid/content/Context;)V")) {
         NATIVE_VOID("initJni", "(Landroid/content/Context;)V", U.activity, 0);
-    } else {
+    } else if (tl_jni_native(UNITY_PLAYER, "initJni", "(Landroid/content/Context;ILjava/lang/String;)V") || tl_jni_native(UNITY_PLAYER_AOS, "initJni", "(Landroid/content/Context;ILjava/lang/String;)V")) {
         /* Unity 6: initJni(Context, int contextType, String), from UnityPlayer.initialize. The type is 0 for an
          * activity or service player (1 is GameActivity), and the string is the player's extra arguments, "" by default. */
         typedef void (*init_fn)(void *env, void *self, void *ctx, uintptr_t type, void *args);
         init_fn init = (init_fn)native_of(UNITY_PLAYER, "initJni", "(Landroid/content/Context;ILjava/lang/String;)V");
-        if (init) init(tl_jni_env(), U.player, U.activity, 0, tl_jni_new_string(U.vulkan ? "-force-vulkan" : ""));
-    }
+        init(tl_jni_env(), U.player, U.activity, 0, tl_jni_new_string(U.vulkan ? "-force-vulkan" : ""));
+    } else NATIVE_VOID("initJni", "(Landroid/content/Context;I)V", U.activity, 0);    /* earlier Unity 6: (Context, contextType) */
     tl_log_line("unity: initJni done");
     /* The rest of the UnityPlayer constructor: the helpers it builds, whose constructors each call a
      * native that gives the engine its reference to the helper's Java class. Without these the engine

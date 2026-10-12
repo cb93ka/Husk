@@ -15,5 +15,5 @@ public class EGLExt {
     public static final int EGL_SYNC_NATIVE_FENCE_SIGNALED_ANDROID = 12614;
     public EGLExt() {}
     public static android.hardware.SyncFence eglDupNativeFenceFDANDROID(android.opengl.EGLDisplay p0, android.opengl.EGLSync p1) { return null; }
-    public static boolean eglPresentationTimeANDROID(android.opengl.EGLDisplay p0, android.opengl.EGLSurface p1, long p2) { return false; }
+    public static boolean eglPresentationTimeANDROID(android.opengl.EGLDisplay p0, android.opengl.EGLSurface p1, long p2) { return true; }
 }

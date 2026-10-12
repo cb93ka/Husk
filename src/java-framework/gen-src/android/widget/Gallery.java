@@ -29,7 +29,6 @@ public class Gallery extends android.widget.AbsSpinner implements android.view.G
     public void onInitializeAccessibilityNodeInfoInternal(android.view.accessibility.AccessibilityNodeInfo p0) {}
     public boolean onKeyDown(int p0, android.view.KeyEvent p1) { return false; }
     public boolean onKeyUp(int p0, android.view.KeyEvent p1) { return false; }
-    public void onLayout(boolean p0, int p1, int p2, int p3, int p4) {}
     public void onLongPress(android.view.MotionEvent p0) {}
     public boolean onScroll(android.view.MotionEvent p0, android.view.MotionEvent p1, float p2, float p3) { return false; }
     public void onShowPress(android.view.MotionEvent p0) {}

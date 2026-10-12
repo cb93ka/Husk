@@ -10,7 +10,6 @@ public class FragmentBreadCrumbs extends android.view.ViewGroup implements andro
     public FragmentBreadCrumbs(android.content.Context p0, android.util.AttributeSet p1, int p2, int p3) { super(p0, p1, p2, p3); }
     public void onBackStackChanged() {}
     public void onLayout(boolean p0, int p1, int p2, int p3, int p4) {}
-    public void onMeasure(int p0, int p1) {}
     public void setActivity(android.app.Activity p0) { huskProps.put("Activity", p0); }
     public void setMaxVisible(int p0) { huskProps.put("MaxVisible", Integer.valueOf(p0)); }
     public void setOnBreadCrumbClickListener(android.app.FragmentBreadCrumbs.OnBreadCrumbClickListener p0) { huskProps.put("OnBreadCrumbClickListener", p0); }

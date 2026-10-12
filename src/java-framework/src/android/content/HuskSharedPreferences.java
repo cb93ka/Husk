@@ -7,7 +7,10 @@ import java.util.*;
 public final class HuskSharedPreferences implements SharedPreferences {
     private final File file;
     private final HashMap<String, Object> map = new HashMap<>();
-    private final ArrayList<OnSharedPreferenceChangeListener> listeners = new ArrayList<>();
+    private final java.util.concurrent.CopyOnWriteArrayList<OnSharedPreferenceChangeListener> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private static final android.os.Handler MAIN = new android.os.Handler(android.os.Looper.getMainLooper());
+    private static final java.util.concurrent.ExecutorService WRITER = java.util.concurrent.Executors.newSingleThreadExecutor(r -> { Thread t = new Thread(r, "SharedPreferencesWriter"); t.setDaemon(true); return t; });
+    private final java.util.concurrent.atomic.AtomicBoolean writePending = new java.util.concurrent.atomic.AtomicBoolean();
 
     public HuskSharedPreferences(File f) { file = f; load(); }
 
@@ -61,32 +64,53 @@ public final class HuskSharedPreferences implements SharedPreferences {
     public synchronized float getFloat(String k, float d) { Object v = map.get(k); return v instanceof Float ? (Float) v : d; }
     public synchronized boolean getBoolean(String k, boolean d) { Object v = map.get(k); return v instanceof Boolean ? (Boolean) v : d; }
     public synchronized boolean contains(String k) { return map.containsKey(k); }
-    public void registerOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener l) { listeners.add(l); }
+    public void registerOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener l) { if (l != null && !listeners.contains(l)) listeners.add(l); }
     public void unregisterOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener l) { listeners.remove(l); }
+    /* As Android's: an editor's changes go to memory at once (under the preferences' lock), apply() writes the file in the
+       background (one write for a burst), listeners hear each changed key on the main thread. Editors may be shared between threads. */
+    private void notifyChanged(List<String> keys) {
+        if (listeners.isEmpty() || keys.isEmpty()) return;
+        Runnable r = () -> { for (OnSharedPreferenceChangeListener l : listeners) for (String k : keys) l.onSharedPreferenceChanged(this, k); };
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) r.run(); else MAIN.post(r);
+    }
+    private List<String> toMemory(boolean clear, Set<String> removes, Map<String, Object> puts) {
+        ArrayList<String> changed = new ArrayList<>();
+        synchronized (this) {
+            if (clear && !map.isEmpty()) map.clear();
+            for (String k : removes) if (map.remove(k) != null) changed.add(k);
+            for (Map.Entry<String, Object> e : puts.entrySet()) {
+                Object old = e.getValue() == null ? map.remove(e.getKey()) : map.put(e.getKey(), e.getValue());
+                if (!Objects.equals(old, e.getValue())) changed.add(e.getKey());
+            }
+        }
+        return changed;
+    }
+    /** As QueuedWork.waitToFinish: apply()'s pending writes done before an activity pauses or stops (the app may be killed after). */
+    public static void flushAll() { try { WRITER.submit(() -> {}).get(2, java.util.concurrent.TimeUnit.SECONDS); } catch (Exception e) {} }
     public Editor edit() {
         return new Editor() {
             private final HashMap<String, Object> puts = new HashMap<>();
             private final HashSet<String> removes = new HashSet<>();
             private boolean clear;
-            public Editor putString(String k, String v) { puts.put(k, v); return this; }
-            public Editor putStringSet(String k, Set<String> v) { puts.put(k, v == null ? null : new HashSet<>(v)); return this; }
-            public Editor putInt(String k, int v) { puts.put(k, v); return this; }
-            public Editor putLong(String k, long v) { puts.put(k, v); return this; }
-            public Editor putFloat(String k, float v) { puts.put(k, v); return this; }
-            public Editor putBoolean(String k, boolean v) { puts.put(k, v); return this; }
-            public Editor remove(String k) { removes.add(k); return this; }
-            public Editor clear() { clear = true; return this; }
-            public boolean commit() {
-                synchronized (HuskSharedPreferences.this) {
-                    if (clear) map.clear();
-                    for (String k : removes) map.remove(k);
-                    for (Map.Entry<String, Object> e : puts.entrySet()) { if (e.getValue() == null) map.remove(e.getKey()); else map.put(e.getKey(), e.getValue()); }
-                }
-                boolean ok = save();
-                for (OnSharedPreferenceChangeListener l : listeners) for (String k : puts.keySet()) l.onSharedPreferenceChanged(HuskSharedPreferences.this, k);
-                return ok;
+            public synchronized Editor putString(String k, String v) { puts.put(k, v); return this; }
+            public synchronized Editor putStringSet(String k, Set<String> v) { puts.put(k, v == null ? null : new HashSet<>(v)); return this; }
+            public synchronized Editor putInt(String k, int v) { puts.put(k, v); return this; }
+            public synchronized Editor putLong(String k, long v) { puts.put(k, v); return this; }
+            public synchronized Editor putFloat(String k, float v) { puts.put(k, v); return this; }
+            public synchronized Editor putBoolean(String k, boolean v) { puts.put(k, v); return this; }
+            public synchronized Editor remove(String k) { removes.add(k); return this; }
+            public synchronized Editor clear() { clear = true; return this; }
+            private List<String> takeAndApply() {
+                boolean c; HashSet<String> r; HashMap<String, Object> p;
+                synchronized (this) { c = clear; r = new HashSet<>(removes); p = new HashMap<>(puts); clear = false; removes.clear(); puts.clear(); }
+                return toMemory(c, r, p);
             }
-            public void apply() { commit(); }
+            public boolean commit() { List<String> ch = takeAndApply(); boolean ok = save(); notifyChanged(ch); return ok; }
+            public void apply() {
+                List<String> ch = takeAndApply();
+                if (writePending.compareAndSet(false, true)) WRITER.execute(() -> { writePending.set(false); save(); });
+                notifyChanged(ch);
+            }
         };
     }
 }

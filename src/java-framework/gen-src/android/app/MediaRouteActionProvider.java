@@ -7,9 +7,6 @@ public class MediaRouteActionProvider extends android.view.ActionProvider {
     public MediaRouteActionProvider(android.content.Context p0) { super(p0); }
     public boolean isVisible() { return (huskProps.get("Visible") instanceof Boolean ? (Boolean) huskProps.get("Visible") : false); }
     public android.view.View onCreateActionView() { return null; }
-    public android.view.View onCreateActionView(android.view.MenuItem p0) { return null; }
-    public boolean onPerformDefaultAction() { return false; }
-    public boolean overridesItemVisibility() { return false; }
     public void setExtendedSettingsClickListener(android.view.View.OnClickListener p0) { huskProps.put("ExtendedSettingsClickListener", p0); }
     public void setRouteTypes(int p0) { huskProps.put("RouteTypes", Integer.valueOf(p0)); }
     MediaRouteActionProvider() { this((android.content.Context) null); }

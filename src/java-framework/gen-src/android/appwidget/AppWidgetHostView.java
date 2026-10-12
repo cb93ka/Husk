@@ -23,7 +23,6 @@ public class AppWidgetHostView extends android.widget.FrameLayout implements and
     protected boolean isVisibilityTrackingPermitted() { return (huskProps.get("VisibilityTrackingPermitted") instanceof Boolean ? (Boolean) huskProps.get("VisibilityTrackingPermitted") : false); }
     protected void onDefaultViewClicked(android.view.View p0) {}
     public void onInitializeAccessibilityNodeInfoInternal(android.view.accessibility.AccessibilityNodeInfo p0) {}
-    public void onLayout(boolean p0, int p1, int p2, int p3, int p4) {}
     public void onUpdateProviderInfo(android.appwidget.AppWidgetProviderInfo p0) {}
     public void onViewDataChanged(int p0) {}
     public void onVisibilityAggregated(boolean p0) {}
