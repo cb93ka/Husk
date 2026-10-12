@@ -38,7 +38,9 @@ static char *es31_downgrade(const char *src, size_t n, es31_bind *rec, int *nrec
     char *out = malloc(n + 4096); size_t o = 0;
     *nrec = 0;
     const char *ver = strstr(src, "#version 310 es");
-    if (!ver) { memcpy(out, src, n); out[n] = 0; return out; }
+    /* A 300 es shader with explicit uniform locations (UE4's GLSL_ES3_1_ANDROID): only those go, also on a real 3.1 driver. */
+    bool v300 = !ver && strstr(src, "#version 300 es") && strstr(src, "location");
+    if (!ver && !v300) { memcpy(out, src, n); out[n] = 0; return out; }
     for (size_t i = 0; i < n;) {
         if (src + i == ver) { memcpy(out + o, "#version 300 es", 15); o += 15; i += 15; continue; }
         if (i + 7 <= n && !strncmp(src + i, "layout(", 7) && (i == 0 || !es31_ident(src[i - 1]))) {
@@ -46,12 +48,12 @@ static char *es31_downgrade(const char *src, size_t n, es31_bind *rec, int *nrec
             while (j < n && depth) { if (src[j] == '(') depth++; else if (src[j] == ')') depth--; j++; }
             char q[160]; size_t ql = j - 1 - (i + 7); if (ql >= sizeof(q)) ql = sizeof(q) - 1;
             memcpy(q, src + i + 7, ql); q[ql] = 0;
-            char *b = strstr(q, "binding");
+            char *b = v300 ? NULL : strstr(q, "binding");
             size_t d = j; while (d < n && src[d] != ';' && src[d] != '{') d++;
             char decl[200]; size_t dl = d - j; if (dl >= sizeof(decl)) dl = sizeof(decl) - 1;
             memcpy(decl, src + j, dl); decl[dl] = 0;
             bool opaque = strstr(decl, "image") || strstr(decl, "atomic_uint");
-            bool ssbo = !opaque && strstr(decl, "buffer") && d < n && src[d] == '{' && !strstr(decl, "writeonly") && !strstr(decl, "coherent");
+            bool ssbo = !v300 && !opaque && strstr(decl, "buffer") && d < n && src[d] == '{' && !strstr(decl, "writeonly") && !strstr(decl, "coherent");
             if (ssbo && b) {
                 /* A read-only storage block of structs becomes a uniform block of 1024 of them (std140 and std430 lay these structs out alike
                  * when their members are 4-byte scalars); the game's glBindBufferBase on the storage target is redirected to the uniform one. */
@@ -112,7 +114,7 @@ static char *es31_downgrade(const char *src, size_t n, es31_bind *rec, int *nrec
 static void (*r_glShaderSource)(unsigned, int, const char *const *, const int *);
 static void w_glShaderSource(unsigned sh, int count, const char *const *str, const int *len)
 {
-    if (!g_es31_shim || count <= 0 || !str) { r_glShaderSource(sh, count, str, len); return; }
+    if (count <= 0 || !str) { r_glShaderSource(sh, count, str, len); return; }
     size_t total = 0;
     for (int i = 0; i < count; i++) total += str[i] ? (len && len[i] >= 0 ? (size_t)len[i] : strlen(str[i])) : 0;
     char *cat = malloc(total + 1); size_t k = 0;

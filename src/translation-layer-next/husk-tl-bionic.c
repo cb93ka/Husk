@@ -125,15 +125,8 @@ static const struct { const char *k, *v; } k_props[] = {
     { "ro.system.build.version.sdk", "34" }, { "ro.product.first_api_level", "34" },
 };
 
-extern atomic_bool tl_vk_device_made;
-
 const char *tl_sysprop(const char *name)
 {
-    /* Swappy off for games that render with Vulkan. Its ChoreographerFilter keeps lengthening its idea of the refresh
-     * period there until frames come every 150-300 ms (PvZ Fusion: 5-9 fps; 60 without it). Only for Vulkan: on GLES,
-     * Unity 2022 takes the -1 a disabled SwappyGL reports for the swap interval as a frame rate near zero and waits forever
-     * for its next frame; there Swappy works once its filter threads wake on time (tl_thread_realtime). */
-    if (!strcmp(name, "swappy.disable")) return atomic_load(&tl_vk_device_made) && !getenv("TL_SWAPPY") ? "1" : NULL;
     for (size_t i = 0; i < sizeof(k_props) / sizeof(k_props[0]); i++) if (!strcmp(k_props[i].k, name)) return k_props[i].v;
     return NULL;
 }

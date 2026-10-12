@@ -76,6 +76,8 @@ static void vk_load(void)
 }
 static bool vk_ready(void) { pthread_once(&V.once, vk_load); return V.gipa != NULL; }
 bool tl_vk_available(void) { return V.have_path && vk_ready(); }
+/* No Vulkan after all: libvulkan.so is not found from now on (an engine that has not opened it yet uses OpenGL ES). */
+void tl_vk_withdraw(void) { V.have_path = false; }
 
 /* MoltenVK's own list of instance extensions */
 static vk_ext_props *mvk_instance_exts(uint32_t *n)
@@ -646,8 +648,6 @@ static void w_vkGetPhysicalDeviceMemoryProperties2KHR(void *pd, vk_mem_props2 *p
 }
 
 static pfn_create_device g_real_create_device;
-atomic_bool tl_vk_device_made;     /* the game has a VkDevice: it renders with Vulkan (husk-tl-bionic.c turns Swappy off) */
-
 static int w_vkCreateDevice(void *pd, const vk_device_ci *ci, const void *alloc, void **out)
 {
     if (!g_real_create_device) return -3;
@@ -692,7 +692,6 @@ static int w_vkCreateDevice(void *pd, const vk_device_ci *ci, const void *alloc,
     tl_log_line("vulkan: vkCreateDevice(%u extensions) -> %d", ci->extCount, r);
     if (r == VK_SUCCESS && out && *out) {
         make_null_buffer(pd, *out);
-        atomic_store(&tl_vk_device_made, true);
     }
     return r;
 }
@@ -781,7 +780,6 @@ static void *w_vkGetInstanceProcAddr(void *instance, const char *name)
 static void *w_vkGetDeviceProcAddr(void *device, const char *name)
 {
     if (!name || !vk_ready()) return NULL;
-    if (device) atomic_store(&tl_vk_device_made, true);   /* some engines create the device through a pointer we don't wrap */
     void *fn = overridden(name);
     LOG("vulkan: vkGetDeviceProcAddr(%s)%s", name, fn ? " -> Husk's" : "");
     if (fn) return fn;

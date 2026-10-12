@@ -440,6 +440,8 @@ static bool launch(int engine, const char *apk, const char *data_dir, void *meta
     if (!apk || !data_dir || !metal_layer || width <= 0 || height <= 0 || !angle_dylib) return false;
     if (!atomic_compare_exchange_strong(&A.state, &expected, HUSK_UNITY_STARTING)) return false;
     A.engine = engine;
+    /* What a game prints to stdout reaches the log a line at a time: block-buffered, the last lines before a sudden death were lost (Source Engine). */
+    setvbuf(stdout, NULL, _IOLBF, 0);
     snprintf(A.apk, sizeof(A.apk), "%s", apk);
     snprintf(A.data, sizeof(A.data), "%s", data_dir);
     snprintf(A.angle, sizeof(A.angle), "%s", angle_dylib);
@@ -568,6 +570,7 @@ void husk_native_set_system_files(const char *cacerts_dir, const char *fonts_roo
 /* Where MoltenVK is: Unreal's Vulkan renderer runs on it. Before the launch call. */
 void husk_ue4_set_vulkan(const char *dylib) { snprintf(A.vulkan, sizeof(A.vulkan), "%s", dylib ? dylib : ""); }
 void husk_unity_set_renderer(int renderer) { g_unity_renderer = renderer; }
+int husk_unity_renderer(void) { return g_unity_renderer; }
 void husk_godot_set_keyboard_handler(void (*handler)(int action)) { tl_godot_set_keyboard_handler(handler); }
 void husk_unity_set_keyboard_handler(void (*handler)(int action, const char *text, int flags)) { tl_unity_set_keyboard_handler(handler); }
 void husk_unity_input_text(const char *utf8, int end) { if (atomic_load(&A.state) == HUSK_UNITY_RUNNING && A.engine == ENGINE_UNITY) tl_unity_input_text(utf8, end); }

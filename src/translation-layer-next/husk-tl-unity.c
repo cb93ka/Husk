@@ -45,6 +45,9 @@ static struct {
     bool vulkan;             /* the engine was told -force-vulkan */
 } U;
 
+/* The game's Graphics setting (husk-tl-unity-app.c): 0 automatic, 1 OpenGL ES, 2 Vulkan. Automatic where the app is not linked in (the harness). */
+__attribute__((weak)) int husk_unity_renderer(void) { return 0; }
+
 /*
  * The UI thread: Android's main thread, with its looper. libunity's JNI_OnLoad takes ALooper_forThread() as the UI
  * thread's looper, and the engine later posts work to it (and on Unity 6 waits for that work), so the engine is
@@ -182,6 +185,12 @@ static void load_engine(void)
             tl_egl_offscreen_windows(true);
         }
         tl_log_line("unity: renderer %s", U.vulkan ? "Vulkan (MoltenVK)" : "OpenGL ES (ANGLE)");
+    } else if (U.cfg.vulkan && husk_unity_renderer() == 0) {
+        /* Before Unity 6 the engine picks Vulkan itself whenever libvulkan.so is there, and paces it with SwappyVk, whose filter
+         * drifts to a few frames a second on MoltenVK (PvZ Fusion; turning Swappy off there lost the device to GPU timeouts).
+         * On OpenGL ES its pacing keeps time (tl_thread_realtime). The Graphics setting can still ask for Vulkan. */
+        tl_vk_withdraw();
+        tl_log_line("unity: renderer OpenGL ES (ANGLE) -- Unity before 6 gets Vulkan only when the game's Graphics setting asks for it");
     }
     U.player = tl_jni_new_object(tl_jni_class(U.player_cls));
     U.loaded = ok != 0;

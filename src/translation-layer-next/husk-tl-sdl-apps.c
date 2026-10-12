@@ -357,10 +357,11 @@ void tl_source_prepare(const char *apk, const char *data_dir, const char *packag
         snprintf(content, sizeof(content), "%s/GarrysMod", data_dir);
         mkdir(content, 0755);
         tl_log_line("source: no %s/gameinfo.txt -- put Garry's Mod's game folder (garrysmod, sourceengine, platform, ...) into %s", game, content);
-        const char *id = strrchr(data_dir, '/');
-        char msg[300];
-        snprintf(msg, sizeof(msg), "Put the Garry's Mod game files (garrysmod, sourceengine, platform...) into Files > Husk > TranslationLayer > %s > GarrysMod, then start again",
-                 id ? id + 1 : data_dir);
+        const char *id = strstr(data_dir, "TranslationLayer/");
+        char where[300]; snprintf(where, sizeof(where), "%s", id ? id : data_dir);
+        for (char *c = where; *c; c++) if (*c == '/') *c = '>';
+        char msg[400];
+        snprintf(msg, sizeof(msg), "Put the Garry's Mod game files (garrysmod, sourceengine, platform...) into Files > Husk > %s > GarrysMod, then start again", where);
         tl_progress(msg, -1);
         g_source_missing = true;
     }
