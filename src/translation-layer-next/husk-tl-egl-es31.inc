@@ -287,6 +287,78 @@ static void w_glGetIntegerv(unsigned pname, int *data)
 {
     r_glGetIntegerv(pname, data);
     if (g_es31_shim && pname == 0x821C /* GL_MINOR_VERSION */ && data && *data == 0) *data = g_es3_minor;
+    /* the vertex-attribute-binding limits 3.1 has (emulated below) */
+    if (data && es31_buffers()) {
+        if (pname == 0x82DA /* GL_MAX_VERTEX_ATTRIB_BINDINGS */) *data = 16;
+        else if (pname == 0x82D9 /* GL_MAX_VERTEX_ATTRIB_RELATIVE_OFFSET */) *data = 2047;
+        else if (pname == 0x82E5 /* GL_MAX_VERTEX_ATTRIB_STRIDE */) *data = 2048;
+    }
+}
+
+/*
+ * Separate vertex formats and buffer bindings (ES 3.1: glVertexAttribFormat, glVertexAttribBinding, glBindVertexBuffer) on a 3.0
+ * driver. Unreal's OpenGL ES 3.1 renderer sets its vertex streams up this way; on 3.0 the calls fail, the attributes stay client arrays
+ * with no data and ANGLE crashed in glDrawElements (FNAF Security Breach). Each attribute's format and its binding's buffer, offset,
+ * stride and divisor are kept, and an attribute is set again with glVertexAttribPointer (its buffer bound for the call) whenever one
+ * of them changes. One set of state for all vertex arrays: Unreal draws with one.
+ */
+static void (*r_glBindBuffer)(unsigned, unsigned);
+static struct { int size, type, norm, integer, reloff, binding, has; } g_vab_attr[16];
+static struct { unsigned buf; long off; int stride, divisor; } g_vab_bind[16];
+static void vab_apply(unsigned a)
+{
+    if (a >= 16 || !g_vab_attr[a].has || !a_eglGetProcAddress) return;
+    static void (*ptr)(unsigned, int, unsigned, unsigned char, int, const void *), (*iptr)(unsigned, int, unsigned, int, const void *), (*div)(unsigned, unsigned);
+    if (!ptr) { ptr = a_eglGetProcAddress("glVertexAttribPointer"); iptr = a_eglGetProcAddress("glVertexAttribIPointer"); div = a_eglGetProcAddress("glVertexAttribDivisor"); }
+    if (!ptr || !iptr) return;
+    unsigned b = (unsigned)g_vab_attr[a].binding % 16;
+    int prev = 0; r_glGetIntegerv(0x8894 /* GL_ARRAY_BUFFER_BINDING */, &prev);
+    r_glBindBuffer(0x8892 /* GL_ARRAY_BUFFER */, g_vab_bind[b].buf);
+    const void *at = (const void *)(uintptr_t)(g_vab_bind[b].off + g_vab_attr[a].reloff);
+    if (g_vab_attr[a].integer) iptr(a, g_vab_attr[a].size, (unsigned)g_vab_attr[a].type, g_vab_bind[b].stride, at);
+    else ptr(a, g_vab_attr[a].size, (unsigned)g_vab_attr[a].type, (unsigned char)g_vab_attr[a].norm, g_vab_bind[b].stride, at);
+    if (div) div(a, (unsigned)g_vab_bind[b].divisor);
+    r_glBindBuffer(0x8892, (unsigned)prev);
+}
+static void (*r_glVertexAttribFormat)(unsigned, int, unsigned, unsigned char, unsigned);
+static void w_glVertexAttribFormat(unsigned a, int size, unsigned type, unsigned char norm, unsigned rel)
+{
+    if (!es31_buffers()) { if (r_glVertexAttribFormat) r_glVertexAttribFormat(a, size, type, norm, rel); return; }
+    if (a >= 16) return;
+    g_vab_attr[a].size = size; g_vab_attr[a].type = (int)type; g_vab_attr[a].norm = norm; g_vab_attr[a].integer = 0; g_vab_attr[a].reloff = (int)rel; g_vab_attr[a].has = 1;
+    vab_apply(a);
+}
+static void (*r_glVertexAttribIFormat)(unsigned, int, unsigned, unsigned);
+static void w_glVertexAttribIFormat(unsigned a, int size, unsigned type, unsigned rel)
+{
+    if (!es31_buffers()) { if (r_glVertexAttribIFormat) r_glVertexAttribIFormat(a, size, type, rel); return; }
+    if (a >= 16) return;
+    g_vab_attr[a].size = size; g_vab_attr[a].type = (int)type; g_vab_attr[a].norm = 0; g_vab_attr[a].integer = 1; g_vab_attr[a].reloff = (int)rel; g_vab_attr[a].has = 1;
+    vab_apply(a);
+}
+static void (*r_glVertexAttribBinding)(unsigned, unsigned);
+static void w_glVertexAttribBinding(unsigned a, unsigned b)
+{
+    if (!es31_buffers()) { if (r_glVertexAttribBinding) r_glVertexAttribBinding(a, b); return; }
+    if (a >= 16) return;
+    g_vab_attr[a].binding = (int)b;
+    vab_apply(a);
+}
+static void (*r_glBindVertexBuffer)(unsigned, unsigned, long, int);
+static void w_glBindVertexBuffer(unsigned b, unsigned buf, long off, int stride)
+{
+    if (!es31_buffers()) { if (r_glBindVertexBuffer) r_glBindVertexBuffer(b, buf, off, stride); return; }
+    if (b >= 16) return;
+    g_vab_bind[b].buf = buf; g_vab_bind[b].off = off; g_vab_bind[b].stride = stride;
+    for (unsigned a = 0; a < 16; a++) if (g_vab_attr[a].has && (unsigned)g_vab_attr[a].binding == b) vab_apply(a);
+}
+static void (*r_glVertexBindingDivisor)(unsigned, unsigned);
+static void w_glVertexBindingDivisor(unsigned b, unsigned d)
+{
+    if (!es31_buffers()) { if (r_glVertexBindingDivisor) r_glVertexBindingDivisor(b, d); return; }
+    if (b >= 16) return;
+    g_vab_bind[b].divisor = (int)d;
+    for (unsigned a = 0; a < 16; a++) if (g_vab_attr[a].has && (unsigned)g_vab_attr[a].binding == b) vab_apply(a);
 }
 
 /* The storage-buffer target (a block of the game's data) is a uniform buffer here; a buffer the game made for it is grown to what the
