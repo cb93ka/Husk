@@ -98,7 +98,7 @@ static void CL_findClass(tl_jcall *c)
 /* AndroidThunkJava_SetDesiredViewSize(w, h): the engine renders below the screen's resolution (its device profile's) and has the activity
  * make the surface's buffers that size, which Android shows scaled up to the screen. Without it the picture sat in a corner of a bigger surface. */
 void tl_nwindow_fixed_size(int w, int h);
-static void GA_setViewSize(tl_jcall *c) { tl_nwindow_fixed_size(c->args[0].i, c->args[1].i); }
+static void GA_setViewSize(tl_jcall *c) { if (!getenv("TL_UE4_NO_VIEWSIZE")) tl_nwindow_fixed_size(c->args[0].i, c->args[1].i); }
 
 /*
  * AndroidThunkJava_ForceQuit: the engine has met something it cannot go on after. Its log is compiled out of a shipping build, so the call chain is

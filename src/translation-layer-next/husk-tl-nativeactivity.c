@@ -393,7 +393,7 @@ static void *ui_main(void *arg)
         if (set_surface) set_surface(env, activity, N.cfg.width, N.cfg.height);
     }
     if (N.callbacks.onNativeWindowCreated) N.callbacks.onNativeWindowCreated(&N.na, N.window);
-    if (N.callbacks.onNativeWindowResized) N.callbacks.onNativeWindowResized(&N.na, N.window);
+    if (N.callbacks.onNativeWindowResized && !getenv("TL_UE4_NO_RESIZED")) N.callbacks.onNativeWindowResized(&N.na, N.window);
     if (N.callbacks.onWindowFocusChanged) N.callbacks.onWindowFocusChanged(&N.na, 1);
     if (!N.generic) {
         typedef void (*void_fn)(void *env, void *self);
