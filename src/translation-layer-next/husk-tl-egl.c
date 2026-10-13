@@ -589,6 +589,7 @@ static const unsigned char *w_glGetStringi(unsigned name, unsigned index)
 static void (*r_glCompileShader)(unsigned);
 static void w_glCompileShader(unsigned sh)
 {
+    if (es31_fake_shader(sh)) return;
     static void (*getiv)(unsigned, unsigned, int *), (*getlog)(unsigned, int, int *, char *), (*getsrc)(unsigned, int, int *, char *);
     static atomic_int reported;
     r_glCompileShader(sh);
@@ -655,7 +656,7 @@ static EGLBoolean w_eglDestroySync(EGLDisplay d, void *s) { return s ? r_eglDest
 static const struct { const char *name; void *wrap; void **real; } k_adapt[] = {
     ADAPT(glBlitFramebuffer), ADAPT(glClientWaitSync), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCopyImageSubData),
     ADAPT(glColorMask), ADAPT(glDepthMask), ADAPT(glVertexAttribPointer), ADAPT(glUniformMatrix2fv),
-    ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glBindVertexBuffer), ADAPT(glVertexBindingDivisor),
+    ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glBindVertexBuffer), ADAPT(glVertexBindingDivisor), ADAPT(glCreateShader), ADAPT(glGetShaderiv), ADAPT(glGetProgramiv), ADAPT(glUseProgram), ADAPT(glDispatchCompute), ADAPT(glDispatchComputeIndirect), ADAPT(glMemoryBarrier),
     ADAPT(eglClientWaitSyncKHR), ADAPT(eglDestroySyncKHR), ADAPT(eglGetSyncAttribKHR), ADAPT(eglClientWaitSync), ADAPT(eglDestroySync),
 };
 

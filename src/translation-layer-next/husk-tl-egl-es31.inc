@@ -198,9 +198,65 @@ static char *es30_link_by_location(const char *src, bool vertex)
     return ren;
 }
 
+/*
+ * Compute shaders on a 3.0 driver: ANGLE over Metal has none, and Unreal's ES 3.1 renderer quits when a compute program does not
+ * link (FNAF Security Breach: RHIClearUAVUint -> GetLinkedComputeProgram). Under the shim on 3.0 a compute shader is a stand-in
+ * (a real shader name, never compiled), a program it is attached to links without the driver, and dispatching it does nothing. What
+ * the game computes that way (clearing buffers, GPU particles, some post-processing) is missing; the rest draws.
+ */
+#define ES31_FAKE 8192
+static unsigned g_fake_sh[ES31_FAKE], g_fake_prog[ES31_FAKE];
+static bool fake_has(unsigned *t, unsigned id) { if (!id) return false; for (unsigned k = 0, h = id % ES31_FAKE; k < ES31_FAKE; k++, h = (h + 1) % ES31_FAKE) { if (t[h] == id) return true; if (!t[h]) return false; } return false; }
+static void fake_add(unsigned *t, unsigned id) { if (!id || fake_has(t, id)) return; for (unsigned k = 0, h = id % ES31_FAKE; k < ES31_FAKE; k++, h = (h + 1) % ES31_FAKE) if (!t[h]) { t[h] = id; return; } }
+static bool es31_buffers(void);
+static bool es31_fake_shader(unsigned sh) { return fake_has(g_fake_sh, sh); }
+static bool es31_fake_program(unsigned p) { return fake_has(g_fake_prog, p); }
+
+static unsigned (*r_glCreateShader)(unsigned);
+static unsigned w_glCreateShader(unsigned type)
+{
+    if (type == 0x91B9 /* GL_COMPUTE_SHADER */ && es31_buffers()) {
+        unsigned sh = r_glCreateShader(0x8B31 /* a vertex shader's name, never compiled */);
+        pthread_mutex_lock(&g_es31_mu); fake_add(g_fake_sh, sh); pthread_mutex_unlock(&g_es31_mu);
+        static atomic_int said; if (atomic_fetch_add(&said, 1) == 0) tl_log_line("es31: compute shaders are stand-ins on this driver: dispatches do nothing");
+        return sh;
+    }
+    return r_glCreateShader(type);
+}
+static void (*r_glGetShaderiv)(unsigned, unsigned, int *);
+static void w_glGetShaderiv(unsigned sh, unsigned pname, int *v)
+{
+    if (v && es31_fake_shader(sh)) {
+        if (pname == 0x8B4F /* GL_SHADER_TYPE */) { *v = 0x91B9; return; }
+        if (pname == 0x8B81 /* GL_COMPILE_STATUS */) { *v = 1; return; }
+        if (pname == 0x8B84 /* GL_INFO_LOG_LENGTH */ || pname == 0x8B88 /* GL_SHADER_SOURCE_LENGTH */) { *v = 0; return; }
+    }
+    r_glGetShaderiv(sh, pname, v);
+}
+static void (*r_glGetProgramiv)(unsigned, unsigned, int *);
+static void w_glGetProgramiv(unsigned p, unsigned pname, int *v)
+{
+    if (v && es31_fake_program(p)) {
+        if (pname == 0x8B82 /* GL_LINK_STATUS */ || pname == 0x8B83 /* GL_VALIDATE_STATUS */) *v = 1;
+        else if (pname == 0x8267 /* GL_COMPUTE_WORK_GROUP_SIZE */) { v[0] = v[1] = v[2] = 1; }
+        else *v = 0;
+        return;
+    }
+    r_glGetProgramiv(p, pname, v);
+}
+static void (*r_glUseProgram)(unsigned);
+static void w_glUseProgram(unsigned p) { if (es31_fake_program(p)) return; r_glUseProgram(p); }
+static void (*r_glDispatchCompute)(unsigned, unsigned, unsigned);
+static void w_glDispatchCompute(unsigned x, unsigned y, unsigned z) { if (es31_buffers()) return; if (r_glDispatchCompute) r_glDispatchCompute(x, y, z); }
+static void (*r_glDispatchComputeIndirect)(long);
+static void w_glDispatchComputeIndirect(long o) { if (es31_buffers()) return; if (r_glDispatchComputeIndirect) r_glDispatchComputeIndirect(o); }
+static void (*r_glMemoryBarrier)(unsigned);
+static void w_glMemoryBarrier(unsigned b) { if (es31_buffers()) return; if (r_glMemoryBarrier) r_glMemoryBarrier(b); }
+
 static void (*r_glShaderSource)(unsigned, int, const char *const *, const int *);
 static void w_glShaderSource(unsigned sh, int count, const char *const *str, const int *len)
 {
+    if (es31_fake_shader(sh)) return;                               /* a compute stand-in: never compiled */
     if (count <= 0 || !str) { r_glShaderSource(sh, count, str, len); return; }
     size_t total = 0;
     for (int i = 0; i < count; i++) total += str[i] ? (len && len[i] >= 0 ? (size_t)len[i] : strlen(str[i])) : 0;
@@ -241,6 +297,7 @@ static void w_glShaderSource(unsigned sh, int count, const char *const *str, con
 static void (*r_glAttachShader)(unsigned, unsigned);
 static void w_glAttachShader(unsigned prog, unsigned sh)
 {
+    if (es31_fake_shader(sh)) { pthread_mutex_lock(&g_es31_mu); fake_add(g_fake_prog, prog); pthread_mutex_unlock(&g_es31_mu); return; }
     r_glAttachShader(prog, sh);
     if (!g_es31_shim) return;
     pthread_mutex_lock(&g_es31_mu);
@@ -251,6 +308,7 @@ static void w_glAttachShader(unsigned prog, unsigned sh)
 static void (*r_glLinkProgram)(unsigned);
 static void w_glLinkProgram(unsigned prog)
 {
+    if (es31_fake_program(prog)) return;                            /* a compute stand-in links without the driver */
     r_glLinkProgram(prog);
     if (!g_es31_shim || !a_eglGetProcAddress) return;
     static int (*getloc)(unsigned, const char *); static unsigned (*getblk)(unsigned, const char *);
