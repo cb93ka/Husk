@@ -224,18 +224,23 @@ static const char *w_eglQueryString(EGLDisplay d, EGLint name) { return a_eglQue
 static bool g_es31_shim;           /* defined with the rest of the shim, below */
 static EGLContext w_eglCreateContext(EGLDisplay d, EGLConfig c, EGLContext share, const EGLint *at)
 {
-    /* A game that insists on ES 3.1 or 3.2 (Unreal Engine tries 3.2, then 3.1) is given the 3.0 context ANGLE can make: the version it is then told is the shim's. */
+    /* A game that insists on ES 3.1 or 3.2 (Unreal Engine tries 3.2, then 3.1) gets the newest the driver makes: ANGLE on the
+     * phone makes 3.1, on the Mac only 3.0 -- there the version it is told is the shim's. Asked for as given first: always making
+     * 3.0 left FNAF Security Breach without 3.1 on a phone that has it. */
+    EGLContext ctx = a_eglCreateContext(d, cfg_real(c), share, at);
     EGLint patched[40];
-    if (g_es31_shim && at) {
-        int n = 0;
+    if (!ctx && g_es31_shim && at) {
+        int n = 0, mi = -1;
         for (; at[n] != EGL_NONE && n < 36; n += 2) {
             patched[n] = at[n]; patched[n + 1] = at[n + 1];
-            if (at[n] == 0x30fb /* EGL_CONTEXT_MINOR_VERSION */ && at[n + 1] > 0) patched[n + 1] = 0;
+            if (at[n] == 0x30fb /* EGL_CONTEXT_MINOR_VERSION */ && at[n + 1] > 0) mi = n + 1;
         }
         patched[n] = EGL_NONE;
-        at = patched;
+        if (mi >= 0) {
+            for (int minor = patched[mi] - 1; minor >= 0 && !ctx; minor--) { patched[mi] = minor; ctx = a_eglCreateContext(d, cfg_real(c), share, patched); }
+            at = patched;
+        }
     }
-    EGLContext ctx = a_eglCreateContext(d, cfg_real(c), share, at);
     static int trace = -1;
     if (trace < 0) trace = getenv("TL_EGL_TRACE") ? 1 : 0;
     if (trace || !ctx) {
