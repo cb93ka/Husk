@@ -124,6 +124,80 @@ static char *es31_downgrade(const char *src, size_t n, es31_bind *rec, int *nrec
     return out;
 }
 
+/*
+ * ES 3.0 pairs a vertex shader's outputs with a fragment shader's inputs by name; 3.1 also by location, and UE4's GLSL_ES3_1_ANDROID
+ * relies on that (var_TEXCOORD0 out, in_TEXCOORD0 in, both location 0). On a 3.0 driver (ANGLE over Metal) each such variable loses
+ * its location and is renamed husk_vN after it, so the pairs match by name. Attributes (vertex inputs) and fragment outputs keep
+ * theirs: 3.0 has those. Returns a new string, or NULL when there is nothing to do.
+ */
+#define ES30_MAXV 32
+static char *es30_link_by_location(const char *src, bool vertex)
+{
+    if (!strstr(src, "#version 300 es") || !strstr(src, "location")) return NULL;
+    size_t n = strlen(src);
+    char *out = malloc(n + 1); size_t o = 0;
+    char names[ES30_MAXV][64]; int locs[ES30_MAXV], nv = 0;
+    for (size_t i = 0; i < n;) {
+        if (i + 7 <= n && !strncmp(src + i, "layout(", 7) && (i == 0 || !es31_ident(src[i - 1]))) {
+            size_t j = i + 7; int depth = 1;
+            while (j < n && depth) { if (src[j] == '(') depth++; else if (src[j] == ')') depth--; j++; }
+            char q[160]; size_t ql = j - 1 - (i + 7); if (ql >= sizeof(q)) ql = sizeof(q) - 1;
+            memcpy(q, src + i + 7, ql); q[ql] = 0;
+            const char *lp = strstr(q, "location");
+            size_t d = j; while (d < n && src[d] != ';' && src[d] != '{') d++;
+            /* the words of the declaration: its direction and its name */
+            bool in = false, outw = false, uni = false; char name[64] = "";
+            for (size_t k = j; k < d;) {
+                if (!es31_ident(src[k])) { if (src[k] == '[') break; k++; continue; }
+                size_t e = k; while (e < d && es31_ident(src[e])) e++;
+                size_t wl = e - k;
+                if (wl == 2 && !strncmp(src + k, "in", 2)) in = true;
+                else if (wl == 3 && !strncmp(src + k, "out", 3)) outw = true;
+                else if (wl == 7 && !strncmp(src + k, "uniform", 7)) uni = true;
+                if (wl < sizeof(name)) { memcpy(name, src + k, wl); name[wl] = 0; }
+                k = e;
+            }
+            bool varying = lp && !uni && d < n && src[d] == ';' && ((vertex && outw) || (!vertex && in));
+            const char *eq = lp ? strchr(lp, '=') : NULL;
+            if (varying && eq && name[0] && nv < ES30_MAXV) {
+                snprintf(names[nv], sizeof(names[nv]), "%s", name); locs[nv] = atoi(eq + 1); nv++;
+                /* the layout again without location */
+                char keep[160]; size_t kl = 0; const char *tok = q;
+                while (tok) {
+                    const char *comma = strchr(tok, ',');
+                    size_t tl = comma ? (size_t)(comma - tok) : strlen(tok);
+                    const char *t = tok; size_t tn = tl; while (tn && *t == ' ') { t++; tn--; }
+                    if (tn && !(tn >= 8 && !strncmp(t, "location", 8))) { if (kl) keep[kl++] = ','; memcpy(keep + kl, t, tn); kl += tn; }
+                    tok = comma ? comma + 1 : NULL;
+                }
+                if (kl) { memcpy(out + o, "layout(", 7); o += 7; memcpy(out + o, keep, kl); o += kl; out[o++] = ')'; }
+                i = j; continue;
+            }
+            memcpy(out + o, src + i, j - i); o += j - i; i = j; continue;
+        }
+        out[o++] = src[i++];
+    }
+    out[o] = 0;
+    if (!nv) { free(out); return NULL; }
+    /* every use of those names, renamed (a name grows by at most a few characters) */
+    char *ren = malloc(o + (size_t)nv * 16 * 64 + 1024); size_t r = 0, cap = o + (size_t)nv * 16 * 64 + 1024;
+    for (size_t i = 0; i < o;) {
+        if (es31_ident(out[i]) && (i == 0 || !es31_ident(out[i - 1]))) {
+            size_t e = i; while (e < o && es31_ident(out[e])) e++;
+            int hit = -1;
+            for (int v = 0; v < nv && hit < 0; v++) if (strlen(names[v]) == e - i && !strncmp(out + i, names[v], e - i)) hit = v;
+            if (hit >= 0 && r + 16 < cap) { r += (size_t)sprintf(ren + r, "husk_v%d", locs[hit]); i = e; continue; }
+            if (r + (e - i) + 1 >= cap) { cap = cap * 2 + (e - i); ren = realloc(ren, cap); }
+            memcpy(ren + r, out + i, e - i); r += e - i; i = e; continue;
+        }
+        if (r + 2 >= cap) { cap *= 2; ren = realloc(ren, cap); }
+        ren[r++] = out[i++];
+    }
+    ren[r] = 0;
+    free(out);
+    return ren;
+}
+
 static void (*r_glShaderSource)(unsigned, int, const char *const *, const int *);
 static void w_glShaderSource(unsigned sh, int count, const char *const *str, const int *len)
 {
@@ -151,6 +225,14 @@ static void w_glShaderSource(unsigned sh, int count, const char *const *str, con
     int slot = (int)(sh % ES31_SHADERS);
     g_es31_sh[slot].shader = sh; g_es31_sh[slot].n = nrec; memcpy(g_es31_sh[slot].b, rec, sizeof(es31_bind) * (size_t)nrec);
     pthread_mutex_unlock(&g_es31_mu);
+    /* 3.0: varyings with locations become name-matched (see es30_link_by_location) */
+    if (g_es31_shim && a_eglGetProcAddress) {
+        static void (*getiv)(unsigned, unsigned, int *);
+        if (!getiv) getiv = a_eglGetProcAddress("glGetShaderiv");
+        int type = 0; if (getiv) getiv(sh, 0x8B4F /* GL_SHADER_TYPE */, &type);
+        char *linked = type ? es30_link_by_location(down, type == 0x8B31 /* GL_VERTEX_SHADER */) : NULL;
+        if (linked) { free(down); down = linked; }
+    }
     const char *one = down; int one_len = (int)strlen(down);
     r_glShaderSource(sh, 1, &one, &one_len);
     free(cat); free(down);
