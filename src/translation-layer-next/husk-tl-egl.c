@@ -656,7 +656,7 @@ static EGLBoolean w_eglDestroySync(EGLDisplay d, void *s) { return s ? r_eglDest
 static const struct { const char *name; void *wrap; void **real; } k_adapt[] = {
     ADAPT(glBlitFramebuffer), ADAPT(glClientWaitSync), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCopyImageSubData),
     ADAPT(glColorMask), ADAPT(glDepthMask), ADAPT(glVertexAttribPointer), ADAPT(glUniformMatrix2fv),
-    ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glBindVertexBuffer), ADAPT(glVertexBindingDivisor), ADAPT(glCreateShader), ADAPT(glGetShaderiv), ADAPT(glGetProgramiv), ADAPT(glUseProgram), ADAPT(glDispatchCompute), ADAPT(glDispatchComputeIndirect), ADAPT(glMemoryBarrier),
+    ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glBindVertexBuffer), ADAPT(glVertexBindingDivisor), ADAPT(glCreateShader), ADAPT(glGetShaderiv), ADAPT(glGetProgramiv), ADAPT(glUseProgram), ADAPT(glDispatchCompute), ADAPT(glDispatchComputeIndirect), ADAPT(glMemoryBarrier), ADAPT(glBindTexture), ADAPT(glTexBuffer), ADAPT(glTexBufferEXT), ADAPT(glTexBufferOES), ADAPT(glTexBufferRange), ADAPT(glTexBufferRangeEXT), ADAPT(glMapBufferRange), ADAPT(glUnmapBuffer), ADAPT(glCopyBufferSubData),
     ADAPT(eglClientWaitSyncKHR), ADAPT(eglDestroySyncKHR), ADAPT(eglGetSyncAttribKHR), ADAPT(eglClientWaitSync), ADAPT(eglDestroySync),
 };
 
@@ -799,9 +799,19 @@ void *tl_egl_resolve(const char *name)
     if (trace && name[0] == 'e') tl_log_line("egl: resolve %s -> %p", name, r);
     return r;
 }
+/* entry points the 3.1 shim provides itself on a 3.0 driver: the wrapper even when ANGLE has no such function */
+static const char *const k_es31_emulated[] = {
+    "glVertexAttribFormat", "glVertexAttribIFormat", "glVertexAttribBinding", "glBindVertexBuffer", "glVertexBindingDivisor",
+    "glDispatchCompute", "glDispatchComputeIndirect", "glMemoryBarrier",
+    "glTexBuffer", "glTexBufferEXT", "glTexBufferOES", "glTexBufferRange", "glTexBufferRangeEXT", NULL
+};
 static void *egl_resolve(const char *name)
 {
     for (int i = 0; k_noop_names[i]; i++) if (!strcmp(k_noop_names[i], name)) return (void *)w_gl_noop;
+    if (g_es31_shim) for (int i = 0; k_es31_emulated[i]; i++) if (!strcmp(k_es31_emulated[i], name)) {
+        void *real = E.ready && a_eglGetProcAddress ? a_eglGetProcAddress(name) : NULL;
+        for (size_t j = 0; j < sizeof(k_adapt) / sizeof(k_adapt[0]); j++) if (!strcmp(k_adapt[j].name, name)) { *k_adapt[j].real = real; return k_adapt[j].wrap; }
+    }
     if (g_es31_shim) for (int i = 0; k_es31_stub_names[i]; i++) if (!strcmp(k_es31_stub_names[i], name)) {
         void *real = E.ready && a_eglGetProcAddress ? a_eglGetProcAddress(name) : NULL;
         if (real) break;

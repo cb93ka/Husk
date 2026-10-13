@@ -253,6 +253,65 @@ static void w_glDispatchComputeIndirect(long o) { if (es31_buffers()) return; if
 static void (*r_glMemoryBarrier)(unsigned);
 static void w_glMemoryBarrier(unsigned b) { if (es31_buffers()) return; if (r_glMemoryBarrier) r_glMemoryBarrier(b); }
 
+/*
+ * Buffer textures (samplerBuffer, ES 3.2 / EXT_texture_buffer) on a 3.0 driver. In the shader such a sampler becomes a 2D one 4096 texels
+ * wide and texelFetch(s, i) reads texel (i & 4095, i >> 12); on the GL side (below) the buffer's bytes are copied into that texture,
+ * on the GPU through the pixel-unpack target, whenever the buffer is given data. Unreal's ES 3.1 vertex factories read their streams
+ * this way (FNAF Security Breach: "'samplerBuffer' : Illegal use of reserved word").
+ */
+#define ES31_TBW 4096
+static char *es30_buffer_samplers(const char *src)
+{
+    if (!strstr(src, "samplerBuffer")) return NULL;
+    size_t n = strlen(src);
+    char names[16][64]; int nn = 0;
+    /* the names of the buffer samplers, and the type renamed: [iu]samplerBuffer -> [iu]sampler2D */
+    char *a = malloc(n + 64); size_t o = 0; size_t first_decl = (size_t)-1;
+    for (size_t i = 0; i < n;) {
+        if (!strncmp(src + i, "samplerBuffer", 13) && !es31_ident(src[i + 13]) && (i == 0 || !es31_ident(src[i - 1]) || src[i - 1] == 'i' || src[i - 1] == 'u')) {
+            size_t ls = i; while (ls > 0 && src[ls - 1] != '\n') ls--;
+            if (first_decl == (size_t)-1) { first_decl = o - (i - ls); }
+            memcpy(a + o, "sampler2D", 9); o += 9; i += 13;
+            size_t k = i; while (k < n && (src[k] == ' ' || src[k] == '\t')) k++;
+            size_t e = k; while (e < n && es31_ident(src[e])) e++;
+            if (e > k && e - k < 64 && nn < 16) { memcpy(names[nn], src + k, e - k); names[nn][e - k] = 0; nn++; }
+            continue;
+        }
+        a[o++] = src[i++];
+    }
+    a[o] = 0;
+    if (!nn) { free(a); return NULL; }
+    /* texelFetch(name, expr) -> texelFetch(name, husk_tb(expr), 0) */
+    size_t cap = o * 2 + 512; char *b = malloc(cap); size_t r = 0;
+    static const char helper[] = "highp ivec2 husk_tb(highp int i) { return ivec2(i & 4095, i >> 12); }\n";
+    for (size_t i = 0; i < o;) {
+        if (i == first_decl) { memcpy(b + r, helper, sizeof(helper) - 1); r += sizeof(helper) - 1; }
+        if (!strncmp(a + i, "texelFetch", 10) && (i == 0 || !es31_ident(a[i - 1])) && !es31_ident(a[i + 10])) {
+            size_t k = i + 10; while (k < o && a[k] == ' ') k++;
+            if (k < o && a[k] == '(') {
+                size_t ns = k + 1; while (ns < o && a[ns] == ' ') ns++;
+                size_t ne = ns; while (ne < o && es31_ident(a[ne])) ne++;
+                int hit = 0; for (int v = 0; v < nn; v++) if (strlen(names[v]) == ne - ns && !strncmp(a + ns, names[v], ne - ns)) hit = 1;
+                size_t c = ne; while (c < o && a[c] == ' ') c++;
+                if (hit && c < o && a[c] == ',') {
+                    size_t es = c + 1, j = es; int depth = 0;
+                    while (j < o) { if (a[j] == '(') depth++; else if (a[j] == ')') { if (!depth) break; depth--; } else if (a[j] == ',' && !depth) break; j++; }
+                    if (j < o && a[j] == ')') {
+                        if (r + (j - i) + 64 >= cap) { cap = cap * 2 + (j - i) + 64; b = realloc(b, cap); }
+                        r += (size_t)sprintf(b + r, "texelFetch(%.*s, husk_tb(%.*s), 0)", (int)(ne - ns), a + ns, (int)(j - es), a + es);
+                        i = j + 1; continue;
+                    }
+                }
+            }
+        }
+        if (r + 2 >= cap) { cap *= 2; b = realloc(b, cap); }
+        b[r++] = a[i++];
+    }
+    b[r] = 0;
+    free(a);
+    return b;
+}
+
 static void (*r_glShaderSource)(unsigned, int, const char *const *, const int *);
 static void w_glShaderSource(unsigned sh, int count, const char *const *str, const int *len)
 {
@@ -288,6 +347,8 @@ static void w_glShaderSource(unsigned sh, int count, const char *const *str, con
         int type = 0; if (getiv) getiv(sh, 0x8B4F /* GL_SHADER_TYPE */, &type);
         char *linked = type ? es30_link_by_location(down, type == 0x8B31 /* GL_VERTEX_SHADER */) : NULL;
         if (linked) { free(down); down = linked; }
+        char *tb = es30_buffer_samplers(down);
+        if (tb) { free(down); down = tb; }
     }
     const char *one = down; int one_len = (int)strlen(down);
     r_glShaderSource(sh, 1, &one, &one_len);
@@ -370,7 +431,8 @@ static void vab_apply(unsigned a)
     if (!ptr) { ptr = a_eglGetProcAddress("glVertexAttribPointer"); iptr = a_eglGetProcAddress("glVertexAttribIPointer"); div = a_eglGetProcAddress("glVertexAttribDivisor"); }
     if (!ptr || !iptr) return;
     unsigned b = (unsigned)g_vab_attr[a].binding % 16;
-    int prev = 0; r_glGetIntegerv(0x8894 /* GL_ARRAY_BUFFER_BINDING */, &prev);
+    if (!r_glBindBuffer) r_glBindBuffer = a_eglGetProcAddress("glBindBuffer");
+    int prev = 0; a_glGetIntegerv(0x8894 /* GL_ARRAY_BUFFER_BINDING */, &prev);
     r_glBindBuffer(0x8892 /* GL_ARRAY_BUFFER */, g_vab_bind[b].buf);
     const void *at = (const void *)(uintptr_t)(g_vab_bind[b].off + g_vab_attr[a].reloff);
     if (g_vab_attr[a].integer) iptr(a, g_vab_attr[a].size, (unsigned)g_vab_attr[a].type, g_vab_bind[b].stride, at);
@@ -463,14 +525,168 @@ static void w_glBindBufferBase(unsigned target, unsigned index, unsigned buffer)
     r_glBindBufferBase(target, index, buffer);
 }
 
+/* Buffer textures, the GL side (see es30_buffer_samplers). The texture keeps its name and is a 2D one here. */
+#define ES31_TB 64
+static struct { unsigned tex, buf, ifmt; long off, size; int upload_float; } g_tb[ES31_TB];
+static unsigned g_tb_bound, g_buf_bound_tb;                       /* the last buffer texture bound; the buffer bound to GL_TEXTURE_BUFFER */
+static void (*r_glBindTexture)(unsigned, unsigned);
+static bool tb_format(unsigned ifmt, unsigned *fmt, unsigned *type, int *bpp)
+{
+    switch (ifmt) {
+    case 0x822E: *fmt = 0x1903; *type = 0x1406; *bpp = 4; return true;   /* R32F */
+    case 0x8230: *fmt = 0x8227; *type = 0x1406; *bpp = 8; return true;   /* RG32F */
+    case 0x8815: *fmt = 0x1908; *type = 0x1406; *bpp = 16; return true;  /* RGBA32F */
+    case 0x881A: *fmt = 0x1908; *type = 0x140B; *bpp = 8; return true;   /* RGBA16F */
+    case 0x822D: *fmt = 0x1903; *type = 0x140B; *bpp = 2; return true;   /* R16F */
+    case 0x822F: *fmt = 0x8227; *type = 0x140B; *bpp = 4; return true;   /* RG16F */
+    case 0x8058: *fmt = 0x1908; *type = 0x1401; *bpp = 4; return true;   /* RGBA8 */
+    case 0x8229: *fmt = 0x1903; *type = 0x1401; *bpp = 1; return true;   /* R8 */
+    case 0x822B: *fmt = 0x8227; *type = 0x1401; *bpp = 2; return true;   /* RG8 */
+    case 0x8236: *fmt = 0x8D94; *type = 0x1405; *bpp = 4; return true;   /* R32UI */
+    case 0x823C: *fmt = 0x8228; *type = 0x1405; *bpp = 8; return true;   /* RG32UI */
+    case 0x8D70: *fmt = 0x8D99; *type = 0x1405; *bpp = 16; return true;  /* RGBA32UI */
+    case 0x8235: *fmt = 0x8D94; *type = 0x1404; *bpp = 4; return true;   /* R32I */
+    case 0x823B: *fmt = 0x8228; *type = 0x1404; *bpp = 8; return true;   /* RG32I */
+    case 0x8D82: *fmt = 0x8D99; *type = 0x1404; *bpp = 16; return true;  /* RGBA32I */
+    case 0x8234: *fmt = 0x8D94; *type = 0x1403; *bpp = 2; return true;   /* R16UI */
+    case 0x8D76: *fmt = 0x8D99; *type = 0x1403; *bpp = 8; return true;   /* RGBA16UI */
+    case 0x8232: *fmt = 0x8D94; *type = 0x1401; *bpp = 1; return true;   /* R8UI */
+    case 0x8D7C: *fmt = 0x8D99; *type = 0x1401; *bpp = 4; return true;   /* RGBA8UI */
+    }
+    return false;
+}
+/* the buffer's bytes into slot k's texture, on the GPU; storage (re)made when the size changes */
+static void tb_upload(int k, bool realloc_storage)
+{
+    static void (*getiv)(unsigned, int *), (*getbp)(unsigned, unsigned, int *), (*teximg)(unsigned, int, int, int, int, int, unsigned, unsigned, const void *),
+                (*texsub)(unsigned, int, int, int, int, int, unsigned, unsigned, const void *), (*texpar)(unsigned, unsigned, int), (*pstore)(unsigned, int);
+    if (!getiv && a_eglGetProcAddress) {
+        getiv = a_eglGetProcAddress("glGetIntegerv"); getbp = a_eglGetProcAddress("glGetBufferParameteriv"); teximg = a_eglGetProcAddress("glTexImage2D");
+        texsub = a_eglGetProcAddress("glTexSubImage2D"); texpar = a_eglGetProcAddress("glTexParameteri"); pstore = a_eglGetProcAddress("glPixelStorei");
+    }
+    if (!r_glBindTexture) r_glBindTexture = a_eglGetProcAddress("glBindTexture");
+    if (!r_glBindBuffer) r_glBindBuffer = a_eglGetProcAddress("glBindBuffer");
+    if (!getiv || !getbp || !teximg || !texsub || !texpar || !pstore || !r_glBindTexture || !r_glBindBuffer) return;
+    unsigned fmt, type; int bpp;
+    if (!tb_format(g_tb[k].ifmt, &fmt, &type, &bpp)) { static int said; if (!said++) tl_log_line("es31: buffer texture format %#x not handled", g_tb[k].ifmt); return; }
+    if (g_tb[k].upload_float) { type = 0x1406; bpp = 16; }      /* RGBA32F data into the RGBA16F stand-in */
+    int old_tex = 0, old_unpack = 0, old_align = 4, old_row = 0;
+    getiv(0x8069 /* GL_TEXTURE_BINDING_2D */, &old_tex); getiv(0x88EF /* GL_PIXEL_UNPACK_BUFFER_BINDING */, &old_unpack);
+    getiv(0x0CF5 /* GL_UNPACK_ALIGNMENT */, &old_align); getiv(0x0CF2 /* GL_UNPACK_ROW_LENGTH */, &old_row);
+    r_glBindBuffer(0x88EC /* GL_PIXEL_UNPACK_BUFFER */, g_tb[k].buf);
+    long size = g_tb[k].size;
+    if (size <= 0) { int bs = 0; getbp(0x88EC, 0x8764 /* GL_BUFFER_SIZE */, &bs); size = bs - g_tb[k].off; }
+    long texels = size > 0 ? size / bpp : 0;
+    int rows = (int)((texels + ES31_TBW - 1) / ES31_TBW); if (rows < 1) rows = 1;
+    static unsigned (*geterr)(void); if (!geterr) geterr = a_eglGetProcAddress("glGetError");
+    static int dbg = -1; if (dbg < 0) dbg = getenv("TL_TB_TRACE") ? 1 : 0;
+#define TBE(tag) if (dbg && geterr) { unsigned e_ = geterr(); if (e_) tl_log_line("es31: buffer texture: GL error %#x at %s", e_, tag); }
+    TBE("start")
+    r_glBindTexture(0x0DE1, g_tb[k].tex); TBE("bind texture")
+    if (realloc_storage) {
+        r_glBindBuffer(0x88EC, 0);
+        if (geterr) while (geterr()) {}
+        teximg(0x0DE1, 0, (int)g_tb[k].ifmt, ES31_TBW, rows, 0, fmt, type, NULL);
+        /* ANGLE over Metal refuses RGBA32F texture storage: the data goes into RGBA16F, converted on upload (half precision) */
+        if (g_tb[k].ifmt == 0x8815 && geterr && geterr()) { g_tb[k].ifmt = 0x881A; g_tb[k].upload_float = 1; teximg(0x0DE1, 0, 0x881A, ES31_TBW, rows, 0, 0x1908, 0x1406, NULL); }
+        TBE("storage")
+        texpar(0x0DE1, 0x2801, 0x2600); texpar(0x0DE1, 0x2800, 0x2600);   /* NEAREST, no mipmaps: complete for texelFetch */
+        r_glBindBuffer(0x88EC, g_tb[k].buf);
+    }
+    pstore(0x0CF5, 1); pstore(0x0CF2, 0);
+    long full = texels / ES31_TBW, rest = texels % ES31_TBW;
+    if (full) texsub(0x0DE1, 0, 0, 0, ES31_TBW, (int)full, fmt, type, (const void *)(uintptr_t)g_tb[k].off); TBE("rows")
+    if (rest) texsub(0x0DE1, 0, 0, (int)full, (int)rest, 1, fmt, type, (const void *)(uintptr_t)(g_tb[k].off + full * ES31_TBW * bpp)); TBE("last row")
+    pstore(0x0CF5, old_align); pstore(0x0CF2, old_row);
+    r_glBindBuffer(0x88EC, (unsigned)old_unpack);
+    r_glBindTexture(0x0DE1, (unsigned)old_tex);
+}
+static void tb_refresh_buffer(unsigned buf)
+{
+    if (!buf) return;
+    for (int k = 0; k < ES31_TB; k++) if (g_tb[k].tex && g_tb[k].buf == buf) tb_upload(k, false);
+}
+static void w_glBindTexture(unsigned target, unsigned tex)
+{
+    if (target == 0x8C2A /* GL_TEXTURE_BUFFER */ && es31_buffers()) { g_tb_bound = tex; r_glBindTexture(0x0DE1, tex); return; }
+    r_glBindTexture(target, tex);
+}
+static void tb_attach(unsigned ifmt, unsigned buf, long off, long size)
+{
+    if (!g_tb_bound) return;
+    int k = -1;
+    for (int i = 0; i < ES31_TB && k < 0; i++) if (g_tb[i].tex == g_tb_bound) k = i;
+    for (int i = 0; i < ES31_TB && k < 0; i++) if (!g_tb[i].tex) k = i;
+    if (k < 0) { static int said; if (!said++) tl_log_line("es31: more than %d buffer textures", ES31_TB); return; }
+    g_tb[k].tex = g_tb_bound; g_tb[k].buf = buf; g_tb[k].ifmt = ifmt; g_tb[k].off = off; g_tb[k].size = size; g_tb[k].upload_float = 0;
+    static atomic_int said; if (atomic_fetch_add(&said, 1) == 0) tl_log_line("es31: buffer textures are 2D textures here (first: format %#x)", ifmt);
+    tb_upload(k, true);
+}
+static void (*r_glTexBuffer)(unsigned, unsigned, unsigned);
+static void w_glTexBuffer(unsigned target, unsigned ifmt, unsigned buf) { if (es31_buffers()) { tb_attach(ifmt, buf, 0, 0); return; } if (r_glTexBuffer) r_glTexBuffer(target, ifmt, buf); }
+static void (*r_glTexBufferEXT)(unsigned, unsigned, unsigned);
+static void w_glTexBufferEXT(unsigned target, unsigned ifmt, unsigned buf) { if (es31_buffers()) { tb_attach(ifmt, buf, 0, 0); return; } if (r_glTexBufferEXT) r_glTexBufferEXT(target, ifmt, buf); }
+static void (*r_glTexBufferOES)(unsigned, unsigned, unsigned);
+static void w_glTexBufferOES(unsigned target, unsigned ifmt, unsigned buf) { if (es31_buffers()) { tb_attach(ifmt, buf, 0, 0); return; } if (r_glTexBufferOES) r_glTexBufferOES(target, ifmt, buf); }
+static void (*r_glTexBufferRange)(unsigned, unsigned, unsigned, long, long);
+static void w_glTexBufferRange(unsigned target, unsigned ifmt, unsigned buf, long off, long size) { if (es31_buffers()) { tb_attach(ifmt, buf, off, size); return; } if (r_glTexBufferRange) r_glTexBufferRange(target, ifmt, buf, off, size); }
+static void (*r_glTexBufferRangeEXT)(unsigned, unsigned, unsigned, long, long);
+static void w_glTexBufferRangeEXT(unsigned target, unsigned ifmt, unsigned buf, long off, long size) { if (es31_buffers()) { tb_attach(ifmt, buf, off, size); return; } if (r_glTexBufferRangeEXT) r_glTexBufferRangeEXT(target, ifmt, buf, off, size); }
+
+/* which buffer each target holds, for the data calls below to find it */
+static unsigned g_buf_on[8];
+static int buf_slot(unsigned t)
+{
+    switch (t) { case 0x8892: return 0; case 0x8893: return 1; case 0x8F36: return 2; case 0x8F37: return 3; case 0x8A11: return 4; case 0x8C2A: return 5; case 0x88EC: return 6; case 0x90D2: return 7; }
+    return -1;
+}
+static unsigned buf_on(unsigned t) { int s = buf_slot(t); return s >= 0 ? g_buf_on[s] : 0; }
+/* GL_TEXTURE_BUFFER as a buffer target does not exist on 3.0: the copy-write target stands in for it */
+#define ES31_TBTARGET(t) ((t) == 0x8C2A ? 0x8F37u : (t))
+
 /* The other calls that name the storage target: it is the uniform one here. */
 #define ES31_STORAGE(t) ((t) == 0x90D2 ? 0x8A11u : (t))
-static void (*r_glBindBuffer)(unsigned, unsigned);
-static void w_glBindBuffer(unsigned t, unsigned b) { es31_note_storage("glBindBuffer", t); r_glBindBuffer(es31_buffers() ? ES31_STORAGE(t) : t, b); }
+static void w_glBindBuffer(unsigned t, unsigned b)
+{
+    es31_note_storage("glBindBuffer", t);
+    if (!es31_buffers()) { r_glBindBuffer(t, b); return; }
+    int sl = buf_slot(t); if (sl >= 0) g_buf_on[sl] = b;
+    r_glBindBuffer(ES31_TBTARGET(ES31_STORAGE(t)), b);
+}
 static void (*r_glBufferData)(unsigned, long, const void *, unsigned);
-static void w_glBufferData(unsigned t, long n, const void *d, unsigned u) { es31_note_storage("glBufferData", t); r_glBufferData(es31_buffers() ? ES31_STORAGE(t) : t, n, d, u); }
+static void w_glBufferData(unsigned t, long n, const void *d, unsigned u)
+{
+    es31_note_storage("glBufferData", t);
+    if (!es31_buffers()) { r_glBufferData(t, n, d, u); return; }
+    r_glBufferData(ES31_TBTARGET(ES31_STORAGE(t)), n, d, u);
+    unsigned b = buf_on(t);
+    for (int k = 0; k < ES31_TB; k++) if (g_tb[k].tex && g_tb[k].buf == b && b) tb_upload(k, true);
+}
 static void (*r_glBufferSubData)(unsigned, long, long, const void *);
-static void w_glBufferSubData(unsigned t, long o, long n, const void *d) { es31_note_storage("glBufferSubData", t); r_glBufferSubData(es31_buffers() ? ES31_STORAGE(t) : t, o, n, d); }
+static void w_glBufferSubData(unsigned t, long o, long n, const void *d)
+{
+    es31_note_storage("glBufferSubData", t);
+    if (!es31_buffers()) { r_glBufferSubData(t, o, n, d); return; }
+    r_glBufferSubData(ES31_TBTARGET(ES31_STORAGE(t)), o, n, d);
+    tb_refresh_buffer(buf_on(t));
+}
+static void *(*r_glMapBufferRange)(unsigned, long, long, unsigned);
+static void *w_glMapBufferRange(unsigned t, long o, long n, unsigned access) { return r_glMapBufferRange(es31_buffers() ? ES31_TBTARGET(ES31_STORAGE(t)) : t, o, n, access); }
+static unsigned char (*r_glUnmapBuffer)(unsigned);
+static unsigned char w_glUnmapBuffer(unsigned t)
+{
+    if (!es31_buffers()) return r_glUnmapBuffer(t);
+    unsigned char ok = r_glUnmapBuffer(ES31_TBTARGET(ES31_STORAGE(t)));
+    tb_refresh_buffer(buf_on(t));
+    return ok;
+}
+static void (*r_glCopyBufferSubData)(unsigned, unsigned, long, long, long);
+static void w_glCopyBufferSubData(unsigned rt, unsigned wt, long ro, long wo, long n)
+{
+    if (!es31_buffers()) { r_glCopyBufferSubData(rt, wt, ro, wo, n); return; }
+    r_glCopyBufferSubData(ES31_TBTARGET(ES31_STORAGE(rt)), ES31_TBTARGET(ES31_STORAGE(wt)), ro, wo, n);
+    tb_refresh_buffer(buf_on(wt));
+}
 static void (*r_glBindBufferRange)(unsigned, unsigned, unsigned, long, long);
 static void w_glBindBufferRange(unsigned t, unsigned i, unsigned b, long o, long n)
 {
