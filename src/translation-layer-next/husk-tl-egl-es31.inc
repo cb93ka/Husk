@@ -576,7 +576,7 @@ static void w_glBindBufferBase(unsigned target, unsigned index, unsigned buffer)
 }
 
 /* Buffer textures, the GL side (see es30_buffer_samplers). The texture keeps its name and is a 2D one here. */
-#define ES31_TB 64
+#define ES31_TB 1024
 static struct { unsigned tex, buf, ifmt; long off, size; int upload_float; } g_tb[ES31_TB];
 static unsigned g_tb_bound, g_buf_bound_tb;                       /* the last buffer texture bound; the buffer bound to GL_TEXTURE_BUFFER */
 static void (*r_glBindTexture)(unsigned, unsigned);
@@ -663,10 +663,31 @@ static void tb_refresh_buffer(unsigned buf)
     if (!buf) return;
     for (int k = 0; k < ES31_TB; k++) if (g_tb[k].tex && g_tb[k].buf == buf) tb_upload(k, false);
 }
+/* A buffer texture's slot is freed with the texture (or the name bound as an ordinary texture, which is a new one by that name): the names
+ * come back, and an entry left behind went on filling an engine's ordinary texture of that name from a buffer, until the table ran out and the
+ * buffer textures after that were never filled (FNAF Security Breach, a minute into the game, then a crash). */
+static void tb_forget_texture(unsigned tex)
+{
+    for (int k = 0; k < ES31_TB && tex; k++) if (g_tb[k].tex == tex) memset(&g_tb[k], 0, sizeof(g_tb[k]));
+    if (g_tb_bound == tex) g_tb_bound = 0;
+}
 static void w_glBindTexture(unsigned target, unsigned tex)
 {
     if (target == 0x8C2A /* GL_TEXTURE_BUFFER */ && es31_buffers()) { g_tb_bound = tex; r_glBindTexture(0x0DE1, tex); return; }
+    if (tex && es31_buffers() && (target == 0x0DE1 || target == 0x8513 || target == 0x806F || target == 0x8C1A)) tb_forget_texture(tex);
     r_glBindTexture(target, tex);
+}
+static void (*r_glDeleteTextures)(int, const unsigned *);
+static void w_glDeleteTextures(int n, const unsigned *names)
+{
+    if (es31_buffers() && names) for (int i = 0; i < n; i++) tb_forget_texture(names[i]);
+    r_glDeleteTextures(n, names);
+}
+static void (*r_glDeleteBuffers)(int, const unsigned *);
+static void w_glDeleteBuffers(int n, const unsigned *names)
+{
+    if (es31_buffers() && names) for (int i = 0; i < n; i++) for (int k = 0; k < ES31_TB && names[i]; k++) if (g_tb[k].buf == names[i]) g_tb[k].buf = 0;
+    r_glDeleteBuffers(n, names);
 }
 static void tb_attach(unsigned ifmt, unsigned buf, long off, long size)
 {

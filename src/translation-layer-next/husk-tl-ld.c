@@ -1107,7 +1107,11 @@ static void patch_image(tl_lib *L, size_t *n_tpidr, size_t *n_adrp, size_t *n_ad
                 if (G.verbosity >= 3) tl_log_line("ld: %s: x18 word %08x at +%#llx left alone", L->name, insn, (unsigned long long)(L->code[r].start + (uint64_t)i * 4));
             }
             if (xr == X18_DONE) { L->n_x18++; continue; }
-            if (xr == X18_FAILED) { L->n_x18_failed++; continue; }
+            if (xr == X18_FAILED) {
+                L->n_x18_failed++;
+                if (G.verbosity >= 2 || getenv("TL_X18_LOG")) tl_log_line("ld: %s: x18 instruction %08x at +%#llx could not be rewritten", L->name, insn, (unsigned long long)va);
+                continue;
+            }
             if ((insn & 0xFFFFFFE0u) == 0xD53B0020u) {            /* mrs Xt, ctr_el0: privileged for user code on Apple silicon */
                 /* The cache type register: the smallest cache lines the program may assume. Code that flushes the
                  * instruction cache (V8) reads it to step by line; 64 bytes is right for Apple's and safe for any. */
