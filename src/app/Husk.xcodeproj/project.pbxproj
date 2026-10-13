@@ -83,6 +83,8 @@
 		581DC803F723FFB10DDA759F /* HuskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85AAFB3E92FE2AE4A2FA4DD8 /* HuskApp.swift */; };
 		58F5A9CE8DC62C27EC01AD68 /* husk-tl-opensles.c in Sources */ = {isa = PBXBuildFile; fileRef = FBD3B29AEC525999260507BD /* husk-tl-opensles.c */; };
 		5926C1BBD1419AFBBFA2D1D6 /* husk-tl-http.m in Sources */ = {isa = PBXBuildFile; fileRef = 4B24977AD9B892864CD39481 /* husk-tl-http.m */; };
+		AF89712E5944BF63C5CC2E54 /* husk-tl-layer.m in Sources */ = {isa = PBXBuildFile; fileRef = B6B939199CAC1267F9E31827 /* husk-tl-layer.m */; };
+		FE4C1F0F2C8A8FDCFEBA16C5 /* husk-tl-ue4-media.m in Sources */ = {isa = PBXBuildFile; fileRef = DEB3CD0504225ACD7BE8112D /* husk-tl-ue4-media.m */; };
 		593072F45F39BDEBE0E914ED /* husk-tl-dvm-gles10.c in Sources */ = {isa = PBXBuildFile; fileRef = 15908FFFE74FB2AA12F01161 /* husk-tl-dvm-gles10.c */; };
 		59514CBA483F71A738A3B444 /* HuskMetalPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B259C39CD9CC4D2A8A3D8E8 /* HuskMetalPresenter.swift */; };
 		5A16FA25E013C8B240A5E342 /* husk-tl-dvm-jvm.c in Sources */ = {isa = PBXBuildFile; fileRef = 8BE75C276770496B7712F36A /* husk-tl-dvm-jvm.c */; };
@@ -315,6 +317,8 @@
 		4A0490485F9BA884A0554EAD /* GuestManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuestManifest.swift; sourceTree = "<group>"; };
 		4B06A9BB292E04A841BE20D2 /* stb_vorbis.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = stb_vorbis.inc; sourceTree = "<group>"; };
 		4B24977AD9B892864CD39481 /* husk-tl-http.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "husk-tl-http.m"; sourceTree = "<group>"; };
+		B6B939199CAC1267F9E31827 /* husk-tl-layer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "husk-tl-layer.m"; sourceTree = "<group>"; };
+		DEB3CD0504225ACD7BE8112D /* husk-tl-ue4-media.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = "husk-tl-ue4-media.m"; sourceTree = "<group>"; };
 		4B259C39CD9CC4D2A8A3D8E8 /* HuskMetalPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HuskMetalPresenter.swift; sourceTree = "<group>"; };
 		4BD6ABD20471B2CACF60ABD4 /* TranslationLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationLayer.swift; sourceTree = "<group>"; };
 		4BD91E5537023860BD27A855 /* WebApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebApp.swift; sourceTree = "<group>"; };
@@ -691,6 +695,8 @@
 				7B5E2D3E9F12A2A3BB5BBDC7 /* husk-tl-gtasa.h */,
 				97E83F7EE31FE180D0FA3105 /* husk-tl-http.h */,
 				4B24977AD9B892864CD39481 /* husk-tl-http.m */,
+				B6B939199CAC1267F9E31827 /* husk-tl-layer.m */,
+				DEB3CD0504225ACD7BE8112D /* husk-tl-ue4-media.m */,
 				FD6B5A72980D1EC374BFC326 /* husk-tl-jni-assetstream.c */,
 				3F25C8D085028063DE39D3F2 /* husk-tl-jni-audiotrack.c */,
 				B76CE6F39722749AA0027959 /* husk-tl-jni-cocos.c */,
@@ -1135,6 +1141,8 @@
 				FB6777B7C3F72DF377987A11 /* husk-tl-godot.c in Sources */,
 				BF3B75F24D911729EFB2E8A6 /* husk-tl-gtasa.c in Sources */,
 				5926C1BBD1419AFBBFA2D1D6 /* husk-tl-http.m in Sources */,
+				AF89712E5944BF63C5CC2E54 /* husk-tl-layer.m in Sources */,
+				FE4C1F0F2C8A8FDCFEBA16C5 /* husk-tl-ue4-media.m in Sources */,
 				9E3948EF967C2A0773C521DD /* husk-tl-jni-assetstream.c in Sources */,
 				493E20A0B04C84895AF33F83 /* husk-tl-jni-audiotrack.c in Sources */,
 				240D4917EC7FC510B753EB4E /* husk-tl-jni-cocos.c in Sources */,
@@ -1279,6 +1287,8 @@
 					"-framework",
 					Accelerate,
 					"-framework",
+					AVFoundation,
+					"-framework",
 					Security,
 					"-lhusk_rppairing",
 				);
@@ -1356,6 +1366,8 @@
 					CoreVideo,
 					"-framework",
 					Accelerate,
+					"-framework",
+					AVFoundation,
 					"-framework",
 					Security,
 					"-lhusk_rppairing",

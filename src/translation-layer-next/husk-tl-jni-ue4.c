@@ -95,6 +95,11 @@ static void CL_findClass(tl_jcall *c)
     c->ret = vl(NULL);
 }
 
+/* AndroidThunkJava_SetDesiredViewSize(w, h): the engine renders below the screen's resolution (its device profile's) and has the activity
+ * make the surface's buffers that size, which Android shows scaled up to the screen. Without it the picture sat in a corner of a bigger surface. */
+void tl_nwindow_fixed_size(int w, int h);
+static void GA_setViewSize(tl_jcall *c) { tl_nwindow_fixed_size(c->args[0].i, c->args[1].i); }
+
 /*
  * AndroidThunkJava_ForceQuit: the engine has met something it cannot go on after. Its log is compiled out of a shipping build, so the call chain is
  * the only account of why; it is printed, and the thread stops (on Android the process would be gone in a moment).
@@ -233,6 +238,7 @@ static const tl_jhle k_hle[] = {
     M_(CLS, "AndroidThunkJava_IsScreenCaptureDisabled", "()Z", GA_false),
     M_(CLS, "AndroidThunkJava_IapIsAllowedToMakePurchases", "()Z", GA_false),
     M_(CLS, "AndroidThunkJava_GooglePAD_Available", "()Z", GA_false),
+    M_(CLS, "AndroidThunkJava_SetDesiredViewSize", "(II)V", GA_setViewSize),
     M_(CLS, "AndroidThunkJava_IsAllowedRemoteNotifications", "()Z", GA_false),
     { NULL, NULL, NULL, NULL }
 };
@@ -248,6 +254,10 @@ void tl_ue4_hle_install(const char *pkg, const char *apk, const char *data, cons
     tl_jni_declare("com/epicgames/ue4/GameApplication", "android/app/Application");
     tl_jni_declare("java/lang/Boolean", "java/lang/Object");
     tl_jni_register_hle(k_hle);
+    { void tl_ue4_media_install(void); tl_ue4_media_install(); }
+    /* GameActivity.ANDROID_BUILD_VERSION, which its onCreate sets from Build.VERSION.SDK_INT: FAndroidMisc::GetAndroidBuildVersion reads it
+     * (again every frame while it is 0), and the media player is there only from 14 up -- at 0 every video stayed a white texture (FNAF Security Breach). */
+    { jvalue v; v.j = 0; v.i = 34; tl_jni_set_static(CLS, "ANDROID_BUILD_VERSION", "I", v); }
     /* The enum constants EOS reads off EOSOverlay.BrowserStatus: with no class initialiser to run they would be null, which it takes as a broken SDK. */
     static const char *const status[] = { "BEGIN_LOAD", "CLOSED", "CRASHED", "END_LOAD", "LOAD_ERROR" };
     for (size_t i = 0; i < sizeof(status) / sizeof(status[0]); i++) {

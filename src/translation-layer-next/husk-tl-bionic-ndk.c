@@ -791,8 +791,26 @@ static void b_ANativeActivity_input(void *a, uint32_t flags) { (void)a; (void)fl
 typedef struct tl_nwindow { atomic_int refs; int width, height, format; void *layer; jobj *texture; void *bits; } tl_nwindow;
 static tl_nwindow g_window = { 1, 1080, 2400, 1, NULL, NULL, NULL };
 
-void tl_nwindow_configure(int w, int h, void *layer) { g_window.width = w; g_window.height = h; g_window.layer = layer; }
-void tl_nwindow_resize(int w, int h) { g_window.width = w; g_window.height = h; }
+/* The screen's size in pixels, and the size the game asked its buffers to be (SurfaceHolder.setFixedSize: Unreal's SetDesiredViewSize), which
+ * the screen shows scaled up. The window keeps the screen's size -- Unreal works its render size out of it, and maps touches, which stay in
+ * screen pixels as Android's do, by it -- and its EGL surface gets the buffers' size. 0: the buffers are the screen's size. */
+static int g_screen_w, g_screen_h, g_fixed_w, g_fixed_h;
+void tl_layer_fit(void *layer, int w, int h);       /* husk-tl-layer.m */
+int tl_nwindow_width(void *window);
+int tl_nwindow_height(void *window);
+void tl_nwindow_configure(int w, int h, void *layer) { g_window.width = g_screen_w = w; g_window.height = g_screen_h = h; g_window.layer = layer; g_fixed_w = g_fixed_h = 0; }
+void tl_nwindow_resize(int w, int h) { g_window.width = g_screen_w = w; g_window.height = g_screen_h = h; }
+void tl_nwindow_fixed_size(int w, int h)
+{
+    if (w <= 0 || h <= 0 || w > g_screen_w || h > g_screen_h || (w == g_screen_w && h == g_screen_h)) { w = h = 0; }
+    if (w == g_fixed_w && h == g_fixed_h) return;
+    g_fixed_w = w; g_fixed_h = h;
+    tl_log_line("window: buffers %dx%d, shown on a %dx%d screen", w ? w : g_screen_w, h ? h : g_screen_h, g_screen_w, g_screen_h);
+    if (g_window.layer) tl_layer_fit(g_window.layer, w ? w : g_screen_w, h ? h : g_screen_h);
+}
+/* The size of a window's buffers: what its EGL surface is made at. */
+int tl_nwindow_buffer_width(void *window) { return window == &g_window && g_fixed_w ? g_fixed_w : tl_nwindow_width(window); }
+int tl_nwindow_buffer_height(void *window) { return window == &g_window && g_fixed_h ? g_fixed_h : tl_nwindow_height(window); }
 void *tl_nwindow_get(void) { atomic_fetch_add(&g_window.refs, 1); return &g_window; }
 void *tl_nwindow_native(void *window) { return window ? ((tl_nwindow *)window)->layer : NULL; }
 int tl_nwindow_width(void *window) { return window ? ((tl_nwindow *)window)->width : 0; }

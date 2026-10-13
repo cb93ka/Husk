@@ -592,6 +592,22 @@ static int b_open(const char *path, int flags, unsigned mode)
     return fd;
 }
 static int b___open_2(const char *path, int flags) { return b_open(path, flags, 0); }
+/* Where a guest file's bytes are on the host: a file and the range of it (the APK's stored entries and the virtual files, an OBB served out of the
+ * APK among them, are ranges of a bigger file). For code that hands a guest file to a host library by name (the video player). */
+bool tl_guest_file_range(const char *path, char *host, size_t n, uint64_t *off, uint64_t *size)
+{
+    jar_entry jar;
+    if (jar_lookup(path, &jar)) {
+        if (!jar.found || jar.dir || jar.method != 0) return false;
+        snprintf(host, n, "%s", jar.apk); *off = jar.off; *size = jar.size; return true;
+    }
+    const vfile *vf = vfile_find(path);
+    if (vf) { snprintf(host, n, "%s", vf->host); *off = vf->off; *size = vf->size; return true; }
+    char buf[1024]; const char *real = tl_path_resolve(path, buf, sizeof(buf));
+    struct stat st;
+    if (!real || stat(real, &st) != 0) return false;
+    snprintf(host, n, "%s", real); *off = 0; *size = (uint64_t)st.st_size; return true;
+}
 static bool net_trace_fd(int fd);
 /* eventfds are pipes whose read end is the descriptor the guest holds: writes to it go to the other end, and closing it closes both */
 static int g_evfd_peer[1024];

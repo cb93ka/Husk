@@ -371,6 +371,13 @@ static void w_glLinkProgram(unsigned prog)
 {
     if (es31_fake_program(prog)) return;                            /* a compute stand-in links without the driver */
     r_glLinkProgram(prog);
+    { static int trace = -1, n; if (trace < 0) trace = getenv("TL_TEX_TRACE") || getenv("TL_LINK_TRACE") ? 1 : 0;
+      if (trace && a_eglGetProcAddress) {
+          static void (*gpi)(unsigned, unsigned, int *), (*gpl)(unsigned, int, int *, char *);
+          if (!gpi) { gpi = a_eglGetProcAddress("glGetProgramiv"); gpl = a_eglGetProcAddress("glGetProgramInfoLog"); }
+          int ok = 1; if (gpi) gpi(prog, 0x8B82, &ok);
+          if (!ok && n++ < 10) { char log[600] = ""; if (gpl) gpl(prog, sizeof(log), NULL, log); for (char *q = log; *q; q++) if (*q == '\n') *q = '|'; tl_log_line("gl: program %u did not link: %s", prog, log); }
+      } }
     if (!g_es31_shim || !a_eglGetProcAddress) return;
     static int (*getloc)(unsigned, const char *); static unsigned (*getblk)(unsigned, const char *);
     static void (*blkbind)(unsigned, unsigned, unsigned), (*uni1i)(int, int), (*useprog)(unsigned), (*getprogiv)(unsigned, unsigned, int *);
@@ -439,6 +446,49 @@ static void vab_apply(unsigned a)
     else ptr(a, g_vab_attr[a].size, (unsigned)g_vab_attr[a].type, (unsigned char)g_vab_attr[a].norm, g_vab_bind[b].stride, at);
     if (div) div(a, (unsigned)g_vab_bind[b].divisor);
     r_glBindBuffer(0x8892, (unsigned)prev);
+}
+static void (*r_glClearBufferfv)(unsigned, int, const float *);
+static void w_glClearBufferfv(unsigned buf, int drawbuf, const float *v)
+{
+    r_glClearBufferfv(buf, drawbuf, v);
+    static long probe = -2; if (probe == -2) probe = getenv("TL_DRAW_PROBE") ? atol(getenv("TL_DRAW_PROBE")) : -1;
+    if (probe > 0 && (long)atomic_load(&E.presented) == probe - 1) {
+        int fb = 0, vp[4] = { 0 }; a_glGetIntegerv(0x8CA9, &fb); a_glGetIntegerv(0x0BA2, vp);
+        int sc = 0, sb[4] = { 0 }; static unsigned char (*ie)(unsigned); if (!ie) ie = a_eglGetProcAddress("glIsEnabled"); sc = ie ? ie(0x0C11) : 0; a_glGetIntegerv(0x0C10, sb);
+        tl_log_line("probe: clear %#x[%d] fb %d to %g %g %g %g (viewport %dx%d, scissor %d %d,%d %dx%d)", buf, drawbuf, fb, v ? v[0] : 0, v ? v[1] : 0, v ? v[2] : 0, v ? v[3] : 0, vp[2], vp[3], sc, sb[0], sb[1], sb[2], sb[3]);
+    }
+}
+/* TL_TEX_TRACE: a draw the driver refuses, with what the emulated vertex streams hold */
+static void (*r_glDrawElements)(unsigned, int, unsigned, const void *);
+static void w_glDrawElements(unsigned mode, int count, unsigned type, const void *idx)
+{
+    r_glDrawElements(mode, count, type, idx);
+    /* TL_DRAW_PROBE=<swap number>: in that frame, after each draw, the pixel at the viewport's centre and what drew it */
+    { static long probe = -2; if (probe == -2) probe = getenv("TL_DRAW_PROBE") ? atol(getenv("TL_DRAW_PROBE")) : -1;
+      if (probe > 0 && (long)atomic_load(&E.presented) == probe - 1) {
+          int fb = 0, prog = 0, vp[4] = { 0 }, t0 = 0, t1 = 0, act = 0; a_glGetIntegerv(0x8CA6, &fb); a_glGetIntegerv(0x8B8D, &prog); a_glGetIntegerv(0x0BA2, vp);
+          a_glGetIntegerv(0x84E0, &act);
+          static void (*at)(unsigned), (*rp)(int, int, int, int, unsigned, unsigned, void *), (*rb)(unsigned);
+          if (!at) { at = a_eglGetProcAddress("glActiveTexture"); rp = a_eglGetProcAddress("glReadPixels"); rb = a_eglGetProcAddress("glReadBuffer"); }
+          at(0x84C0); a_glGetIntegerv(0x8069, &t0); at(0x84C1); a_glGetIntegerv(0x8069, &t1); at((unsigned)act);
+          int rfb = 0; a_glGetIntegerv(0x8CAA, &rfb);
+          static void (*bfb)(unsigned, unsigned); if (!bfb) bfb = a_eglGetProcAddress("glBindFramebuffer");
+          bfb(0x8CA8, (unsigned)fb);
+          float pxf[4] = { 0 }; uint8_t px[4] = { 0 };
+          rp(vp[0] + vp[2] / 2, vp[1] + vp[3] / 2, 1, 1, 0x1908, 0x1401, px);
+          unsigned (*ge)(void) = a_eglGetProcAddress("glGetError"); unsigned e = ge(); if (e) { rp(vp[0] + vp[2] / 2, vp[1] + vp[3] / 2, 1, 1, 0x1908, 0x1406, pxf); e = ge(); }
+          bfb(0x8CA8, (unsigned)rfb);
+          tl_log_line("probe: draw %d idx fb %d vp %d,%d %dx%d prog %d tex0 %d tex1 %d -> %d %d %d %d | %g %g %g %g (err %#x)", count, fb, vp[0], vp[1], vp[2], vp[3], prog, t0, t1, px[0], px[1], px[2], px[3], pxf[0], pxf[1], pxf[2], pxf[3], e);
+      } }
+    static int trace = -1, n; if (trace < 0) trace = getenv("TL_TEX_TRACE") ? 1 : 0;
+    if (!trace || n >= 12) return;
+    unsigned (*ge)(void) = a_eglGetProcAddress("glGetError"); unsigned e = ge ? ge() : 0;
+    if (!e) return;
+    n++;
+    char st[600] = ""; size_t k = 0;
+    for (int a = 0; a < 16 && k < 560; a++) if (g_vab_attr[a].has) { unsigned b = (unsigned)g_vab_attr[a].binding % 16; k += (size_t)snprintf(st + k, sizeof(st) - k, " a%d:b%u buf%u off%ld str%d", a, b, g_vab_bind[b].buf, g_vab_bind[b].off + g_vab_attr[a].reloff, g_vab_bind[b].stride); }
+    int vao = 0, ebo = 0, prog = 0; a_glGetIntegerv(0x85B5 /* VERTEX_ARRAY_BINDING */, &vao); a_glGetIntegerv(0x8895, &ebo); a_glGetIntegerv(0x8B8D, &prog);
+    tl_log_line("gl: glDrawElements(%#x, %d) -> error %#x; vao %d ebo %d program %d;%s", mode, count, e, vao, ebo, prog, st);
 }
 static void (*r_glVertexAttribFormat)(unsigned, int, unsigned, unsigned char, unsigned);
 static void w_glVertexAttribFormat(unsigned a, int size, unsigned type, unsigned char norm, unsigned rel)

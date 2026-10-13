@@ -16,6 +16,8 @@
 
 void *tl_nwindow_native(void *window);
 int tl_nwindow_width(void *window);
+int tl_nwindow_buffer_width(void *window);
+int tl_nwindow_buffer_height(void *window);
 void *tl_nwindow_texture(void *window);
 void tl_nwindow_post(void *window, const void *rgba, int w, int h, bool flip);
 int tl_nwindow_height(void *window);
@@ -334,7 +336,7 @@ static EGLSurface w_eglCreateWindowSurface(EGLDisplay d, EGLConfig cfg, void *wi
         return s;
     }
     if (E.frame_dir[0] || g_offscreen_windows) {
-        EGLint pb[] = { EGL_WIDTH, tl_nwindow_width(win), EGL_HEIGHT, tl_nwindow_height(win), EGL_NONE };
+        EGLint pb[] = { EGL_WIDTH, tl_nwindow_buffer_width(win), EGL_HEIGHT, tl_nwindow_buffer_height(win), EGL_NONE };
         EGLSurface s = a_eglCreatePbufferSurface(d, cfg, pb);
         if (!s) {
             /* the config the game chose may draw only to windows: the closest one that also makes buffers */
@@ -349,7 +351,8 @@ static EGLSurface w_eglCreateWindowSurface(EGLDisplay d, EGLConfig cfg, void *wi
     }
     void *layer = tl_nwindow_native(win);
     EGLSurface s = a_eglCreateWindowSurface(d, cfg, layer, at);
-    tl_log_line("egl: window surface %p on layer %p (%dx%d), eglGetError %#x", s, layer, tl_nwindow_width(win), tl_nwindow_height(win), a_eglGetError());
+    tl_log_line("egl: window surface %p on layer %p (%dx%d, buffers %dx%d), eglGetError %#x", s, layer, tl_nwindow_width(win), tl_nwindow_height(win),
+                tl_nwindow_buffer_width(win), tl_nwindow_buffer_height(win), a_eglGetError());
     return s;
 }
 static EGLBoolean w_eglDestroySurface(EGLDisplay d, EGLSurface s)
@@ -485,6 +488,33 @@ static void (*r_glTexSubImage3D)(unsigned, int, int, int, int, int, int, int, un
 static void w_glTexSubImage3D(unsigned t, int l, int x, int y, int z, int w, int h, int d, uint64_t fmt, uint64_t type, const void *px)
 { r_glTexSubImage3D(t, l, x, y, z, w, h, d, (unsigned)fmt, (unsigned)type, px); }
 
+static void (*r_glTexStorage2D)(unsigned, int, unsigned, int, int);
+static void w_glTexStorage2D(unsigned t, int levels, unsigned ifmt, int w, int h)
+{
+    r_glTexStorage2D(t, levels, ifmt, w, h);
+    static int trace = -1, n; if (trace < 0) trace = getenv("TL_TEX_TRACE") ? 1 : 0;
+    if (trace && n++ < 120) { unsigned (*ge)(void) = a_eglGetProcAddress("glGetError"); tl_log_line("gl: TexStorage2D %#x levels %d format %#x %dx%d -> error %#x", t, levels, ifmt, w, h, ge ? ge() : 0); }
+}
+static void (*r_glFramebufferTexture2D)(unsigned, unsigned, unsigned, unsigned, int);
+static void w_glFramebufferTexture2D(unsigned fb, unsigned att, unsigned tt, unsigned tex, int level)
+{
+    r_glFramebufferTexture2D(fb, att, tt, tex, level);
+    static int trace = -1, n; if (trace < 0) trace = getenv("TL_TEX_TRACE") ? 1 : 0;
+    if (trace && n++ < 120) {
+        unsigned (*ge)(void) = a_eglGetProcAddress("glGetError"); unsigned (*st)(unsigned) = a_eglGetProcAddress("glCheckFramebufferStatus");
+        unsigned e = ge ? ge() : 0;
+        tl_log_line("gl: FramebufferTexture2D att %#x tex %u level %d -> error %#x status %#x", att, tex, level, e, st ? st(fb) : 0);
+        if (e && getenv("TL_GL_TRACE")) { static char ring[64 * 40]; tl_egl_recent_calls(ring, sizeof(ring), 24); tl_log_line("gl:   the calls before it: %s", ring); }
+    }
+}
+/* TL_TEX_TRACE: the compressed formats a game uploads, and whether the driver took them */
+static void (*r_glCompressedTexSubImage2D)(unsigned, int, int, int, int, int, unsigned, int, const void *);
+static void w_glCompressedTexSubImage2D(unsigned t, int l, int x, int y, int w, int h, unsigned fmt, int size, const void *data)
+{
+    r_glCompressedTexSubImage2D(t, l, x, y, w, h, fmt, size, data);
+    static int trace = -1, n; if (trace < 0) trace = getenv("TL_TEX_TRACE") ? 1 : 0;
+    if (trace && n++ < 60) { unsigned (*ge)(void) = a_eglGetProcAddress ? a_eglGetProcAddress("glGetError") : NULL; tl_log_line("gl: compressed upload format %#x %dx%d level %d -> error %#x", fmt, w, h, l, ge ? ge() : 0); }
+}
 static void (*r_glCompressedTexSubImage3D)(unsigned, int, int, int, int, int, int, int, unsigned, int, const void *);
 static void w_glCompressedTexSubImage3D(unsigned t, int l, int x, int y, int z, int w, int h, int d, uint64_t fmt, uint64_t size, const void *data)
 { r_glCompressedTexSubImage3D(t, l, x, y, z, w, h, d, (unsigned)fmt, (int)size, data); }
@@ -654,7 +684,7 @@ static EGLBoolean w_eglDestroySync(EGLDisplay d, void *s) { return s ? r_eglDest
 
 #define ADAPT(name) { #name, (void *)w_##name, (void **)&r_##name }
 static const struct { const char *name; void *wrap; void **real; } k_adapt[] = {
-    ADAPT(glBlitFramebuffer), ADAPT(glClientWaitSync), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCopyImageSubData),
+    ADAPT(glBlitFramebuffer), ADAPT(glClientWaitSync), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCompressedTexSubImage2D), ADAPT(glTexStorage2D), ADAPT(glDrawElements), ADAPT(glClearBufferfv), ADAPT(glFramebufferTexture2D), ADAPT(glCopyImageSubData),
     ADAPT(glColorMask), ADAPT(glDepthMask), ADAPT(glVertexAttribPointer), ADAPT(glUniformMatrix2fv),
     ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glBindVertexBuffer), ADAPT(glVertexBindingDivisor), ADAPT(glCreateShader), ADAPT(glGetShaderiv), ADAPT(glGetProgramiv), ADAPT(glUseProgram), ADAPT(glDispatchCompute), ADAPT(glDispatchComputeIndirect), ADAPT(glMemoryBarrier), ADAPT(glBindTexture), ADAPT(glTexBuffer), ADAPT(glTexBufferEXT), ADAPT(glTexBufferOES), ADAPT(glTexBufferRange), ADAPT(glTexBufferRangeEXT), ADAPT(glMapBufferRange), ADAPT(glUnmapBuffer), ADAPT(glCopyBufferSubData),
     ADAPT(eglClientWaitSyncKHR), ADAPT(eglDestroySyncKHR), ADAPT(eglGetSyncAttribKHR), ADAPT(eglClientWaitSync), ADAPT(eglDestroySync),
