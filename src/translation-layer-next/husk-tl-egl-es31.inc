@@ -535,8 +535,15 @@ static bool tb_format(unsigned ifmt, unsigned *fmt, unsigned *type, int *bpp)
     switch (ifmt) {
     case 0x822E: *fmt = 0x1903; *type = 0x1406; *bpp = 4; return true;   /* R32F */
     case 0x8230: *fmt = 0x8227; *type = 0x1406; *bpp = 8; return true;   /* RG32F */
-    case 0x8815: *fmt = 0x1908; *type = 0x1406; *bpp = 16; return true;  /* RGBA32F */
+    case 0x8814: *fmt = 0x1908; *type = 0x1406; *bpp = 16; return true;  /* RGBA32F */
+    case 0x8815: *fmt = 0x1907; *type = 0x1406; *bpp = 12; return true;  /* RGB32F */
     case 0x881A: *fmt = 0x1908; *type = 0x140B; *bpp = 8; return true;   /* RGBA16F */
+    case 0x881B: *fmt = 0x1907; *type = 0x140B; *bpp = 6; return true;   /* RGB16F */
+    case 0x8D7E: *fmt = 0x8D98; *type = 0x1405; *bpp = 12; return true;  /* RGB32UI */
+    case 0x8D83: *fmt = 0x8D98; *type = 0x1404; *bpp = 12; return true;  /* RGB32I */
+    case 0x8F97: *fmt = 0x1908; *type = 0x1400; *bpp = 4; return true;   /* RGBA8_SNORM */
+    case 0x8D8E: *fmt = 0x8D99; *type = 0x1400; *bpp = 4; return true;   /* RGBA8I */
+    case 0x8D88: *fmt = 0x8D99; *type = 0x1402; *bpp = 8; return true;   /* RGBA16I */
     case 0x822D: *fmt = 0x1903; *type = 0x140B; *bpp = 2; return true;   /* R16F */
     case 0x822F: *fmt = 0x8227; *type = 0x140B; *bpp = 4; return true;   /* RG16F */
     case 0x8058: *fmt = 0x1908; *type = 0x1401; *bpp = 4; return true;   /* RGBA8 */
@@ -569,7 +576,7 @@ static void tb_upload(int k, bool realloc_storage)
     if (!getiv || !getbp || !teximg || !texsub || !texpar || !pstore || !r_glBindTexture || !r_glBindBuffer) return;
     unsigned fmt, type; int bpp;
     if (!tb_format(g_tb[k].ifmt, &fmt, &type, &bpp)) { static int said; if (!said++) tl_log_line("es31: buffer texture format %#x not handled", g_tb[k].ifmt); return; }
-    if (g_tb[k].upload_float) { type = 0x1406; bpp = 16; }      /* RGBA32F data into the RGBA16F stand-in */
+    if (g_tb[k].upload_float) { type = 0x1406; bpp = 4 * g_tb[k].upload_float; fmt = g_tb[k].upload_float == 3 ? 0x1907 : 0x1908; }   /* 32-bit float data into the RGBA16F stand-in */
     int old_tex = 0, old_unpack = 0, old_align = 4, old_row = 0;
     getiv(0x8069 /* GL_TEXTURE_BINDING_2D */, &old_tex); getiv(0x88EF /* GL_PIXEL_UNPACK_BUFFER_BINDING */, &old_unpack);
     getiv(0x0CF5 /* GL_UNPACK_ALIGNMENT */, &old_align); getiv(0x0CF2 /* GL_UNPACK_ROW_LENGTH */, &old_row);
@@ -587,8 +594,8 @@ static void tb_upload(int k, bool realloc_storage)
         r_glBindBuffer(0x88EC, 0);
         if (geterr) while (geterr()) {}
         teximg(0x0DE1, 0, (int)g_tb[k].ifmt, ES31_TBW, rows, 0, fmt, type, NULL);
-        /* ANGLE over Metal refuses RGBA32F texture storage: the data goes into RGBA16F, converted on upload (half precision) */
-        if (g_tb[k].ifmt == 0x8815 && geterr && geterr()) { g_tb[k].ifmt = 0x881A; g_tb[k].upload_float = 1; teximg(0x0DE1, 0, 0x881A, ES31_TBW, rows, 0, 0x1908, 0x1406, NULL); }
+        /* storage a driver refuses for 32-bit float texels: the 16-bit float format with as many channels, converted on upload (half precision) */
+        if ((g_tb[k].ifmt == 0x8814 || g_tb[k].ifmt == 0x8815) && geterr && geterr()) { g_tb[k].upload_float = g_tb[k].ifmt == 0x8815 ? 3 : 4; g_tb[k].ifmt = g_tb[k].upload_float == 3 ? 0x881B : 0x881A; teximg(0x0DE1, 0, (int)g_tb[k].ifmt, ES31_TBW, rows, 0, g_tb[k].upload_float == 3 ? 0x1907 : 0x1908, 0x1406, NULL); }
         TBE("storage")
         texpar(0x0DE1, 0x2801, 0x2600); texpar(0x0DE1, 0x2800, 0x2600);   /* NEAREST, no mipmaps: complete for texelFetch */
         r_glBindBuffer(0x88EC, g_tb[k].buf);

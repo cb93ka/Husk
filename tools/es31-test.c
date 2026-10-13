@@ -79,7 +79,7 @@ int main(int argc, char **argv)
     /* the colour at texel 4097 of an RGBA32F buffer texture: the second row */
     float *texels = calloc(4100 * 4, sizeof(float)); texels[4097 * 4 + 0] = 0.0f; texels[4097 * 4 + 1] = 1.0f; texels[4097 * 4 + 2] = 0.0f; texels[4097 * 4 + 3] = 1.0f;
     unsigned tb, tex; glGenBuffers(1, &tb); glBindBuffer(0x8C2A, tb); glBufferData(0x8C2A, 4100 * 16, texels, 0x88E4);
-    glGenTextures(1, &tex); glActiveTexture(0x84C0); glBindTexture(0x8C2A, tex); glTexBuffer(0x8C2A, 0x8815, tb); E("texbuffer")
+    glGenTextures(1, &tex); glActiveTexture(0x84C0); glBindTexture(0x8C2A, tex); glTexBuffer(0x8C2A, 0x8814, tb); E("texbuffer")
 
     float verts[] = { -1, -1, 3, -1, -1, 3 }; unsigned short idx[] = { 0, 1, 2 };
     unsigned vao, vb, ib; glGenVertexArrays(1, &vao); glBindVertexArray(vao);

@@ -297,6 +297,7 @@ bool tl_na_start(const tl_ga_config *cfg)
     if (getenv("TL_UE4_NO_VULKAN")) {
         tl_lib *ue = tl_ld_find_lib("libUE4.so");
         if (ue) { patch_return(ue, "_ZN12FAndroidMisc15ShouldUseVulkanEv", 0); patch_return(ue, "_ZN12FAndroidMisc22ShouldUseDesktopVulkanEv", 0); }
+        tl_egl_offscreen_windows(false);           /* OpenGL ES draws the screen: its window surfaces are real ones, not off-screen buffers left for Vulkan */
     }
     /* Only a game whose pak carries Vulkan shaders can run on Vulkan: one built for OpenGL ES alone (Five Nights at Freddy's: Security Breach)
      * asked for Vulkan finds no shader library for it and quits in FShaderCodeLibrary::InitForRuntime. The pak's index, at its end, names the
@@ -306,6 +307,7 @@ bool tl_na_start(const tl_ga_config *cfg)
         tl_log_line("ue4: the game's pak has OpenGL ES shaders and no Vulkan ones: it runs on OpenGL ES (ANGLE)");
         tl_lib *ue = tl_ld_find_lib("libUE4.so");
         if (ue) { patch_return(ue, "_ZN12FAndroidMisc15ShouldUseVulkanEv", 0); patch_return(ue, "_ZN12FAndroidMisc22ShouldUseDesktopVulkanEv", 0); }
+        tl_egl_offscreen_windows(false);           /* OpenGL ES draws the screen: its window surfaces are real ones, not off-screen buffers left for Vulkan */
     } else if (formats) tl_log_line("ue4: the game's pak has %s shaders", formats == 1 ? "Vulkan" : "Vulkan and OpenGL ES");
     /* ANGLE over Metal speaks OpenGL ES 3.0 and the engine's ES 3.1 shaders will not compile on it, so when MoltenVK is there the engine is asked for Vulkan -- also for a project
      * that defaults to OpenGL ES (bDetectVulkanByDefault off), which Minecraft Dungeons is. TL_UE4_NO_VULKAN opts out; TL_UE4_FORCE_VULKAN forces it even with no MoltenVK. */
