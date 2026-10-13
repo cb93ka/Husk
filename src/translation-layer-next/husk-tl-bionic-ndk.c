@@ -295,9 +295,31 @@ typedef struct { const uint8_t *data; size_t len; size_t pos; uint8_t *owned; ch
 
 static void *b_AAssetManager_fromJava(void *env, void *obj) { (void)env; (void)obj; static int mgr; return &mgr; }
 
+/* What the driver adds to an Unreal game's UE4CommandLine.txt (read through the asset manager at start): tl_ue4_extra_args. */
+static char g_ue4_extra[512];
+void tl_ue4_extra_args(const char *args) { snprintf(g_ue4_extra, sizeof(g_ue4_extra), "%s", args ? args : ""); }
+static void *b_AAssetManager_open_apk(const char *name);
 static void *b_AAssetManager_open(void *mgr, const char *name, int mode)
 {
+    if (g_ue4_extra[0] && name && !strcasecmp(name, "UE4CommandLine.txt")) {
+        tl_asset *orig = b_AAssetManager_open_apk(name);
+        size_t ol = orig ? orig->len : 0, el = strlen(g_ue4_extra);
+        uint8_t *buf = malloc(ol + el + 2);
+        size_t n = 0;
+        if (orig) { memcpy(buf, orig->data, ol); n = ol; while (n && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' ')) n--; if (orig->owned) free(orig->owned); free(orig); }
+        if (n) buf[n++] = ' ';
+        memcpy(buf + n, g_ue4_extra, el); n += el; buf[n] = 0;
+        tl_log_line("ue4: command line: %s", (const char *)buf);
+        tl_asset *a = calloc(1, sizeof(*a));
+        a->data = buf; a->len = n; a->owned = buf;
+        snprintf(a->name, sizeof(a->name), "%s", name);
+        return a;
+    }
     (void)mgr; (void)mode;
+    return b_AAssetManager_open_apk(name);
+}
+static void *b_AAssetManager_open_apk(const char *name)
+{
     char path[1024];
     snprintf(path, sizeof(path), "assets/%s", name);
     static int trace = -1;

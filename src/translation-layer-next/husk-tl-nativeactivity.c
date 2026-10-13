@@ -298,6 +298,9 @@ bool tl_na_start(const tl_ga_config *cfg)
         tl_lib *ue = tl_ld_find_lib("libUE4.so");
         if (ue) { patch_return(ue, "_ZN12FAndroidMisc15ShouldUseVulkanEv", 0); patch_return(ue, "_ZN12FAndroidMisc22ShouldUseDesktopVulkanEv", 0); }
         tl_egl_offscreen_windows(false);           /* OpenGL ES draws the screen: its window surfaces are real ones, not off-screen buffers left for Vulkan */
+        /* What the renderer computes with compute shaders the 3.1 shim cannot run on a 3.0 driver is off: auto exposure read an exposure
+         * nothing had written and the screen came out white (FNAF Security Breach); bloom and light shafts read buffers cleared by compute. */
+        { void tl_ue4_extra_args(const char *args); tl_ue4_extra_args("-ExecCmds=\"r.EyeAdaptationQuality 0,r.DefaultFeature.AutoExposure 0,r.BloomQuality 0,r.LightShaftQuality 0,r.Mobile.EyeAdaptation 0\""); }
     }
     /* Only a game whose pak carries Vulkan shaders can run on Vulkan: one built for OpenGL ES alone (Five Nights at Freddy's: Security Breach)
      * asked for Vulkan finds no shader library for it and quits in FShaderCodeLibrary::InitForRuntime. The pak's index, at its end, names the
@@ -308,6 +311,9 @@ bool tl_na_start(const tl_ga_config *cfg)
         tl_lib *ue = tl_ld_find_lib("libUE4.so");
         if (ue) { patch_return(ue, "_ZN12FAndroidMisc15ShouldUseVulkanEv", 0); patch_return(ue, "_ZN12FAndroidMisc22ShouldUseDesktopVulkanEv", 0); }
         tl_egl_offscreen_windows(false);           /* OpenGL ES draws the screen: its window surfaces are real ones, not off-screen buffers left for Vulkan */
+        /* What the renderer computes with compute shaders the 3.1 shim cannot run on a 3.0 driver is off: auto exposure read an exposure
+         * nothing had written and the screen came out white (FNAF Security Breach); bloom and light shafts read buffers cleared by compute. */
+        { void tl_ue4_extra_args(const char *args); tl_ue4_extra_args("-ExecCmds=\"r.EyeAdaptationQuality 0,r.DefaultFeature.AutoExposure 0,r.BloomQuality 0,r.LightShaftQuality 0,r.Mobile.EyeAdaptation 0\""); }
     } else if (formats) tl_log_line("ue4: the game's pak has %s shaders", formats == 1 ? "Vulkan" : "Vulkan and OpenGL ES");
     /* ANGLE over Metal speaks OpenGL ES 3.0 and the engine's ES 3.1 shaders will not compile on it, so when MoltenVK is there the engine is asked for Vulkan -- also for a project
      * that defaults to OpenGL ES (bDetectVulkanByDefault off), which Minecraft Dungeons is. TL_UE4_NO_VULKAN opts out; TL_UE4_FORCE_VULKAN forces it even with no MoltenVK. */
