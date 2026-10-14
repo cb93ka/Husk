@@ -170,6 +170,97 @@ static bool patch_return(tl_lib *lib, const char *symbol, unsigned value)
     return true;
 }
 
+/*
+ * A quarantine for what the engine frees. FNAF Security Breach goes on using memory it has just freed -- a uniform buffer's resource table, a
+ * moment after the window is made again -- which on Android stays as it was for long enough, while here the allocator's page went straight to
+ * another owner (the video decoder, a float array) and the renderer took floats for a texture pointer. FMallocBinned2::Free is replaced: a block
+ * is handed back (through FreeExternal, the allocator's own thread-safe path) only after it has waited a while, or when the queue is full.
+ */
+typedef void (*ue_free_fn)(void *self, void *ptr);
+static struct { void *self, *ptr; uint64_t t; uint32_t size; void *who[6]; } *g_quar;
+/* TL_UE4_QUARANTINE_CHECK: a freed block is filled with a pattern while it waits; one that comes out changed was written after it was freed,
+ * and the log says what freed it and where the write landed (debugging the engine's use of memory it no longer owns). */
+static int g_quar_check;
+typedef bool (*ue_size_fn)(void *self, void *ptr, uint64_t *size);
+static ue_size_fn g_size_external;
+#define QUAR_POISON 0xA5u
+__attribute__((noinline)) void tl_quar_caught(void *addr) { __asm__ volatile("" :: "r"(addr) : "memory"); }
+static bool quar_report(size_t i)
+{
+    const uint8_t *b = g_quar[i].ptr;
+    size_t first = 0, n = 0;
+    for (size_t k = 0; k < g_quar[i].size; k++) if (b[k] != QUAR_POISON) { if (!n) first = k; n++; }
+    if (!n) return false;
+    tl_quar_caught((uint8_t *)g_quar[i].ptr + (first & ~(size_t)7));
+    static int reports;
+    if (reports++ > 40) return true;
+    uint64_t v = 0; memcpy(&v, b + (first & ~(size_t)7), 8);
+    tl_log_line("ue4: freed block %p (%u bytes) was written after it was freed: %zu bytes changed, first at +%#zx (%#llx)", g_quar[i].ptr, g_quar[i].size, n, first, (unsigned long long)v);
+    for (int f = 0; f < 6 && g_quar[i].who[f]; f++) {
+        const char *lib = NULL; const void *sa = NULL; const char *sym = tl_ld_symbol_at(g_quar[i].who[f], &lib, &sa);
+        tl_log_line("ue4:   freed from %p %s %s+%#lx", g_quar[i].who[f], lib ? lib : "?", sym ? sym : "?", sa ? (unsigned long)((const char *)g_quar[i].who[f] - (const char *)sa) : 0ul);
+    }
+    return true;
+}
+static size_t g_quar_cap, g_quar_head, g_quar_n;
+static uint64_t g_quar_ns;
+static ue_free_fn g_free_external;
+static pthread_mutex_t g_quar_lock = PTHREAD_MUTEX_INITIALIZER;
+#include <time.h>
+static uint64_t quar_now(void) { return clock_gettime_nsec_np(CLOCK_UPTIME_RAW); }
+static void quar_free(void *self, void *ptr)
+{
+    if (!ptr) return;
+    uint64_t now = quar_now();
+    void *out_self[64], *out_ptr[64]; int nout = 0;
+    pthread_mutex_lock(&g_quar_lock);
+    while (g_quar_n && nout < 64 && (g_quar_n == g_quar_cap || now - g_quar[g_quar_head].t > g_quar_ns)) {
+        bool dirty = g_quar_check && g_quar[g_quar_head].size && quar_report(g_quar_head);
+        if (!dirty) { out_self[nout] = g_quar[g_quar_head].self; out_ptr[nout++] = g_quar[g_quar_head].ptr; }   /* a block written after its free is kept out of use */
+        g_quar_head = (g_quar_head + 1) % g_quar_cap; g_quar_n--;
+    }
+    if (g_quar_n < g_quar_cap) {
+        size_t at = (g_quar_head + g_quar_n) % g_quar_cap;
+        g_quar[at].self = self; g_quar[at].ptr = ptr; g_quar[at].t = now; g_quar[at].size = 0; g_quar_n++;
+        if (g_quar_check) {
+            uint64_t sz = 0;
+            if (g_size_external && g_size_external(self, ptr, &sz) && sz && sz <= (1u << 20)) { memset(ptr, QUAR_POISON, (size_t)sz); g_quar[at].size = (uint32_t)sz; }
+            void **fp = __builtin_frame_address(0);
+            for (int f = 0; f < 6; f++) {
+                g_quar[at].who[f] = NULL;
+                if (!fp || ((uintptr_t)fp & 7)) continue;
+                g_quar[at].who[f] = fp[1];
+                void **next = fp[0];
+                fp = next > fp ? next : NULL;
+            }
+        }
+        ptr = NULL;
+    }
+    pthread_mutex_unlock(&g_quar_lock);
+    for (int i = 0; i < nout; i++) g_free_external(out_self[i], out_ptr[i]);
+    if (ptr) g_free_external(self, ptr);
+}
+static void install_free_quarantine(tl_lib *ue)
+{
+    uint32_t *rx = (uint32_t *)tl_ld_sym(ue, "_ZN14FMallocBinned24FreeEPv");
+    g_free_external = (ue_free_fn)tl_ld_sym(ue, "_ZN14FMallocBinned212FreeExternalEPv");
+    if (!rx || !g_free_external) { tl_log_line("ue4: no FMallocBinned2::Free to put a quarantine on"); return; }
+    g_quar_check = getenv("TL_UE4_QUARANTINE_CHECK") != NULL;
+    g_size_external = (ue_size_fn)tl_ld_sym(ue, "_ZN14FMallocBinned225GetAllocationSizeExternalEPvRy");
+    const char *ms = getenv("TL_UE4_QUARANTINE_MS");
+    g_quar_ns = (uint64_t)(ms ? atoi(ms) : 1500) * 1000000ull;
+    g_quar_cap = 1u << 18;
+    g_quar = calloc(g_quar_cap, sizeof(*g_quar));
+    if (!g_quar) return;
+    uint32_t *rw = (uint32_t *)((uint8_t *)rx + tl_xmem_delta());
+    rw[0] = 0x58000050u;                           /* ldr x16, #8 */
+    rw[1] = 0xD61F0200u;                           /* br x16 */
+    uint64_t target = (uint64_t)(uintptr_t)quar_free;
+    memcpy(&rw[2], &target, 8);
+    tl_xmem_flush(rx, 16);
+    tl_log_line("ue4: freed memory waits %llu ms before the engine's allocator reuses it", (unsigned long long)(g_quar_ns / 1000000));
+}
+
 /* The OBB the engine looks for: <package>.obb in the OBB directory, named main.<version>.<package>.obb. */
 #define OBB_VERSION 42
 
@@ -320,6 +411,14 @@ bool tl_na_start(const tl_ga_config *cfg)
     if ((getenv("TL_UE4_FORCE_VULKAN") || (tl_vk_available() && !getenv("TL_UE4_NO_VULKAN") && formats != 2))) {
         tl_lib *ue = tl_ld_find_lib("libUE4.so");
         if (ue) { patch_return(ue, "_ZN12FAndroidMisc15ShouldUseVulkanEv", 1); patch_return(ue, "_ZN12FAndroidMisc17IsVulkanAvailableEv", 1); }
+    }
+    if ((getenv("TL_UE4_QUARANTINE_MS") || getenv("TL_UE4_QUARANTINE_CHECK")) && !getenv("TL_UE4_LEAK")) {   /* debugging only */
+        tl_lib *ue = tl_ld_find_lib("libUE4.so");
+        if (ue) install_free_quarantine(ue);
+    }
+    if (getenv("TL_UE4_LEAK")) {                   /* debugging: nothing the engine frees is reused (FMallocBinned2::Free does nothing) */
+        tl_lib *ue = tl_ld_find_lib("libUE4.so");
+        if (ue) patch_return(ue, "_ZN14FMallocBinned24FreeEPv", 0);
     }
     if (getenv("TL_SYMADDR")) {                    /* debugging: where the named libUE4 functions are, for a debugger's breakpoints */
         tl_lib *ue = tl_ld_find_lib("libUE4.so");

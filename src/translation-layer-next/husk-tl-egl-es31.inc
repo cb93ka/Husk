@@ -413,6 +413,21 @@ static void w_glGetIntegerv(unsigned pname, int *data)
 {
     r_glGetIntegerv(pname, data);
     if (g_es31_shim && pname == 0x821C /* GL_MINOR_VERSION */ && data && *data == 0) *data = g_es3_minor;
+    /* The compute limits 3.1 promises, which a 3.0 driver answers with 0: Unreal sizes its compute parameter cache by
+     * GL_MAX_COMPUTE_UNIFORM_COMPONENTS, and with 0 every compute shader's parameters were copied past an empty buffer into whatever
+     * the allocator had put there -- floats over a uniform buffer's resource table, then a crash a minute into FNAF Security Breach. */
+    if (data && es31_buffers()) {
+        switch (pname) {
+        case 0x8263: /* MAX_COMPUTE_UNIFORM_COMPONENTS */ case 0x8266: /* MAX_COMBINED_COMPUTE_UNIFORM_COMPONENTS */ if (*data < 1024) *data = pname == 0x8263 ? 1024 : 24576; break;
+        case 0x91BB: /* MAX_COMPUTE_UNIFORM_BLOCKS */ if (*data < 12) *data = 12; break;
+        case 0x91BC: /* MAX_COMPUTE_TEXTURE_IMAGE_UNITS */ if (*data < 16) *data = 16; break;
+        case 0x91BD: /* MAX_COMPUTE_IMAGE_UNIFORMS */ case 0x90DB: /* MAX_COMPUTE_SHADER_STORAGE_BLOCKS */ if (*data < 4) *data = 4; break;
+        case 0x8262: /* MAX_COMPUTE_SHARED_MEMORY_SIZE */ if (*data < 16384) *data = 16384; break;
+        case 0x90EB: /* MAX_COMPUTE_WORK_GROUP_INVOCATIONS */ if (*data < 128) *data = 128; break;
+        case 0x8264: /* MAX_COMPUTE_ATOMIC_COUNTER_BUFFERS */ if (*data < 1) *data = 1; break;
+        case 0x8265: /* MAX_COMPUTE_ATOMIC_COUNTERS */ if (*data < 8) *data = 8; break;
+        }
+    }
     /* the vertex-attribute-binding limits 3.1 has (emulated below) */
     if (data && es31_buffers()) {
         if (pname == 0x82DA /* GL_MAX_VERTEX_ATTRIB_BINDINGS */) *data = 16;
