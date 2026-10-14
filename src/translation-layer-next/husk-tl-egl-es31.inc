@@ -349,6 +349,12 @@ static void w_glShaderSource(unsigned sh, int count, const char *const *str, con
         if (linked) { free(down); down = linked; }
         char *tb = es30_buffer_samplers(down);
         if (tb) { free(down); down = tb; }
+        /* debugging (TL_ES31_INVARIANT): gl_Position made invariant, for a depth pre-pass whose positions the colour pass must match */
+        if (type == 0x8B31 && getenv("TL_ES31_INVARIANT") && !strstr(down, "invariant gl_Position")) {
+            char *mainp = strstr(down, "void main()");
+            if (mainp) { size_t pre = (size_t)(mainp - down); char *nd = malloc(strlen(down) + 32);
+                         if (nd) { memcpy(nd, down, pre); strcpy(nd + pre, "invariant gl_Position;\n"); strcat(nd, mainp); free(down); down = nd; } }
+        }
     }
     /* debugging: TL_FS_DEBUG=<expression>: the fragment shader holding TL_FS_DEBUG_MARK writes that instead of its colour */
     { const char *dbg = getenv("TL_FS_DEBUG"), *mark = getenv("TL_FS_DEBUG_MARK");
@@ -479,7 +485,13 @@ static void w_glClearBufferfv(unsigned buf, int drawbuf, const float *v)
     r_glClearBufferfv(buf, drawbuf, v);
     long probe = tl_egl_probe_frame();
     if (probe > 0 && (long)atomic_load(&E.presented) == probe - 1) {
-        int fb = 0, vp[4] = { 0 }; a_glGetIntegerv(0x8CA9, &fb); a_glGetIntegerv(0x0BA2, vp);
+        int fb = 0, vp[4] = { 0 }; a_glGetIntegerv(0x8CA6, &fb); a_glGetIntegerv(0x0BA2, vp);
+        { static void (*gfap)(unsigned, unsigned, unsigned, int *); if (!gfap) gfap = a_eglGetProcAddress("glGetFramebufferAttachmentParameteriv");
+          int nm = 0; if (gfap && fb) gfap(0x8CA9, 0x8CE0 + (unsigned)drawbuf, 0x8CD1, &nm);
+          char who[600] = ""; size_t wk = 0; void **fp = __builtin_frame_address(0);
+          for (int f = 0; f < 5 && fp && wk < 560; f++) { const void *ret = fp[1]; const char *lib = NULL; const void *sa = NULL; const char *sym = ret ? tl_ld_symbol_at(ret, &lib, &sa) : NULL;
+              wk += (size_t)snprintf(who + wk, sizeof(who) - wk, " < %s", sym ? sym : "?"); void **nx = fp[0]; fp = nx > fp ? nx : NULL; }
+          tl_log_line("probe: the clear below is of fb %d colour%d = texture %d, from%s", fb, drawbuf, nm, who); }
         int sc = 0, sb[4] = { 0 }; static unsigned char (*ie)(unsigned); if (!ie) ie = a_eglGetProcAddress("glIsEnabled"); sc = ie ? ie(0x0C11) : 0; a_glGetIntegerv(0x0C10, sb);
         tl_log_line("probe: clear %#x[%d] fb %d to %g %g %g %g (viewport %dx%d, scissor %d %d,%d %dx%d)", buf, drawbuf, fb, v ? v[0] : 0, v ? v[1] : 0, v ? v[2] : 0, v ? v[3] : 0, vp[2], vp[3], sc, sb[0], sb[1], sb[2], sb[3]);
     }
@@ -499,6 +511,8 @@ static void w_glDrawElements(unsigned mode, int count, unsigned type, const void
 {
     { static int skip = -2; if (skip == -2) skip = getenv("TL_SKIP_PROG") ? atoi(getenv("TL_SKIP_PROG")) : -1;   /* debugging: one program's draws left out */
       if (skip > 0) { int cur = 0; a_glGetIntegerv(0x8B8D, &cur); if (cur == skip) return; } }
+    { static int always = -1; if (always < 0) always = getenv("TL_DEPTH_ALWAYS") ? 1 : 0;           /* debugging: no draw fails its depth test */
+      if (always) { static void (*df)(unsigned); if (!df) df = a_eglGetProcAddress("glDepthFunc"); df(0x0207); } }
     r_glDrawElements(mode, count, type, idx);
     /* TL_DRAW_PROBE=<swap number>: in that frame, after each draw, the pixel at the viewport's centre and what drew it */
     { long probe = tl_egl_probe_frame();
