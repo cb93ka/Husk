@@ -194,6 +194,7 @@ static void *control_thread(void *arg)
             else if (sscanf(line, "hold %f %f %ld", &a, &b, &ms) == 3) { tl_na_touch(0, 0, a, b); sleep_ms(ms); tl_na_touch(2, 0, a, b); }
             else if (sscanf(line, "swipe %f %f %f %f %ld", &a, &b, &c, &d, &ms) == 5) do_swipe(a, b, c, d, ms);
             else if (sscanf(line, "wait %ld", &ms) == 1) sleep_ms(ms);
+            else if (!strncmp(line, "probe", 5)) { void tl_egl_probe_soon(void); tl_egl_probe_soon(); }
             else if (sscanf(line, "shot %399s", p) == 1) {
                 char cmd[900]; snprintf(cmd, sizeof(cmd), "sips -s format png '%s/latest.bmp' --out '%s' >/dev/null 2>&1", g_frame_dir, p);
                 if (system(cmd)) fprintf(stderr, "ctl: shot failed\n");

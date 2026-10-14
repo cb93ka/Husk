@@ -507,6 +507,31 @@ static void w_glFramebufferTexture2D(unsigned fb, unsigned att, unsigned tt, uns
         if (e && getenv("TL_GL_TRACE")) { static char ring[64 * 40]; tl_egl_recent_calls(ring, sizeof(ring), 24); tl_log_line("gl:   the calls before it: %s", ring); }
     }
 }
+/* Multisampled rendering into a texture (EXT_multisampled_render_to_texture), which Unreal's mobile renderer uses for its scene: ANGLE takes
+ * the calls, but in the game the scene texture never received what was drawn (FNAF Security Breach: every frame black after the intro). The
+ * attachments are made single-sampled -- the texture is drawn into directly. TL_GL_KEEP_MSRTT keeps the driver's multisampling. */
+static bool msrtt_off(void) { static int off = -1; if (off < 0) off = getenv("TL_GL_KEEP_MSRTT") ? 0 : 1; return off; }
+static void (*r_glFramebufferTexture2DMultisampleEXT)(unsigned, unsigned, unsigned, unsigned, int, int);
+static void w_glFramebufferTexture2DMultisampleEXT(unsigned fb, unsigned att, unsigned tt, unsigned tex, int level, int samples)
+{
+    static int said; if (!said++) tl_log_line("gl: multisampled render-to-texture (%d samples) %s", samples, msrtt_off() ? "made single-sampled" : "kept");
+    if (msrtt_off()) {
+        if (!r_glFramebufferTexture2D) r_glFramebufferTexture2D = a_eglGetProcAddress("glFramebufferTexture2D");
+        r_glFramebufferTexture2D(fb, att, tt, tex, level);
+        return;
+    }
+    r_glFramebufferTexture2DMultisampleEXT(fb, att, tt, tex, level, samples);
+}
+static void (*r_glRenderbufferStorageMultisampleEXT)(unsigned, int, unsigned, int, int);
+static void w_glRenderbufferStorageMultisampleEXT(unsigned t, int samples, unsigned ifmt, int w, int h)
+{
+    if (msrtt_off()) {
+        static void (*rs)(unsigned, unsigned, int, int); if (!rs) rs = a_eglGetProcAddress("glRenderbufferStorage");
+        rs(t, ifmt, w, h);
+        return;
+    }
+    r_glRenderbufferStorageMultisampleEXT(t, samples, ifmt, w, h);
+}
 /* TL_TEX_TRACE: the compressed formats a game uploads, and whether the driver took them */
 static void (*r_glCompressedTexSubImage2D)(unsigned, int, int, int, int, int, unsigned, int, const void *);
 static void w_glCompressedTexSubImage2D(unsigned t, int l, int x, int y, int w, int h, unsigned fmt, int size, const void *data)
@@ -684,7 +709,7 @@ static EGLBoolean w_eglDestroySync(EGLDisplay d, void *s) { return s ? r_eglDest
 
 #define ADAPT(name) { #name, (void *)w_##name, (void **)&r_##name }
 static const struct { const char *name; void *wrap; void **real; } k_adapt[] = {
-    ADAPT(glBlitFramebuffer), ADAPT(glClientWaitSync), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCompressedTexSubImage2D), ADAPT(glTexStorage2D), ADAPT(glDrawElements), ADAPT(glClearBufferfv), ADAPT(glFramebufferTexture2D), ADAPT(glCopyImageSubData),
+    ADAPT(glBlitFramebuffer), ADAPT(glClientWaitSync), ADAPT(glTexSubImage3D), ADAPT(glCompressedTexSubImage3D), ADAPT(glCompressedTexSubImage2D), ADAPT(glTexStorage2D), ADAPT(glDrawElements), ADAPT(glClearBufferfv), ADAPT(glFramebufferTexture2D), ADAPT(glFramebufferTexture2DMultisampleEXT), ADAPT(glRenderbufferStorageMultisampleEXT), ADAPT(glCopyImageSubData),
     ADAPT(glColorMask), ADAPT(glDepthMask), ADAPT(glVertexAttribPointer), ADAPT(glUniformMatrix2fv),
     ADAPT(glUniformMatrix3fv), ADAPT(glUniformMatrix4fv), ADAPT(glSampleCoverage), ADAPT(glGetString), ADAPT(glGetStringi), ADAPT(glCompileShader), ADAPT(glShaderSource), ADAPT(glAttachShader), ADAPT(glLinkProgram), ADAPT(glGetIntegerv), ADAPT(glBindBufferBase), ADAPT(glBindBuffer), ADAPT(glBufferData), ADAPT(glBufferSubData), ADAPT(glBindBufferRange), ADAPT(glVertexAttribFormat), ADAPT(glVertexAttribIFormat), ADAPT(glVertexAttribBinding), ADAPT(glBindVertexBuffer), ADAPT(glVertexBindingDivisor), ADAPT(glCreateShader), ADAPT(glGetShaderiv), ADAPT(glGetProgramiv), ADAPT(glUseProgram), ADAPT(glDispatchCompute), ADAPT(glDispatchComputeIndirect), ADAPT(glMemoryBarrier), ADAPT(glBindTexture), ADAPT(glDeleteTextures), ADAPT(glDeleteBuffers), ADAPT(glTexBuffer), ADAPT(glTexBufferEXT), ADAPT(glTexBufferOES), ADAPT(glTexBufferRange), ADAPT(glTexBufferRangeEXT), ADAPT(glMapBufferRange), ADAPT(glUnmapBuffer), ADAPT(glCopyBufferSubData),
     ADAPT(eglClientWaitSyncKHR), ADAPT(eglDestroySyncKHR), ADAPT(eglGetSyncAttribKHR), ADAPT(eglClientWaitSync), ADAPT(eglDestroySync),
@@ -827,6 +852,8 @@ void *tl_egl_resolve(const char *name)
     static int trace = -1;
     if (trace < 0) trace = getenv("TL_EGL_TRACE") ? 1 : 0;
     if (trace && name[0] == 'e') tl_log_line("egl: resolve %s -> %p", name, r);
+    static int gtrace = -1; if (gtrace < 0) gtrace = getenv("TL_GL_RESOLVE_TRACE") ? 1 : 0;
+    if (gtrace && name[0] == 'g') tl_log_line("gl: resolve %s -> %p", name, r);
     return r;
 }
 /* entry points the 3.1 shim provides itself on a 3.0 driver: the wrapper even when ANGLE has no such function */
@@ -838,6 +865,7 @@ static const char *const k_es31_emulated[] = {
 static void *egl_resolve(const char *name)
 {
     for (int i = 0; k_noop_names[i]; i++) if (!strcmp(k_noop_names[i], name)) return (void *)w_gl_noop;
+    if (getenv("TL_GL_NO_INVALIDATE") && (!strcmp(name, "glInvalidateFramebuffer") || !strcmp(name, "glDiscardFramebufferEXT") || !strcmp(name, "glInvalidateSubFramebuffer"))) return (void *)w_gl_noop;
     if (g_es31_shim) for (int i = 0; k_es31_emulated[i]; i++) if (!strcmp(k_es31_emulated[i], name)) {
         void *real = E.ready && a_eglGetProcAddress ? a_eglGetProcAddress(name) : NULL;
         for (size_t j = 0; j < sizeof(k_adapt) / sizeof(k_adapt[0]); j++) if (!strcmp(k_adapt[j].name, name)) { *k_adapt[j].real = real; return k_adapt[j].wrap; }

@@ -350,6 +350,12 @@ static void w_glShaderSource(unsigned sh, int count, const char *const *str, con
         char *tb = es30_buffer_samplers(down);
         if (tb) { free(down); down = tb; }
     }
+    /* debugging: TL_FS_DEBUG=<expression>: the fragment shader holding TL_FS_DEBUG_MARK writes that instead of its colour */
+    { const char *dbg = getenv("TL_FS_DEBUG"), *mark = getenv("TL_FS_DEBUG_MARK");
+      if (dbg && mark && strstr(down, mark)) { char *at = NULL, *q = down; while ((q = strstr(q, "out_Target0.xyzw = "))) { at = q; q++; }
+        char *end = at ? strchr(at, ';') : NULL;
+        if (at && end) { size_t pre = (size_t)(at - down); char *nd = malloc(strlen(down) + strlen(dbg) + 64);
+                  if (nd) { memcpy(nd, down, pre); sprintf(nd + pre, "out_Target0 = %s;%s", dbg, end + 1); free(down); down = nd; tl_log_line("gl: shader %u writes %s (TL_FS_DEBUG)", sh, dbg); } } } }
     const char *one = down; int one_len = (int)strlen(down);
     r_glShaderSource(sh, 1, &one, &one_len);
     { const char *dir = getenv("TL_GL_SHADER_DUMP_ALL");    /* debugging: every shader as the driver gets it, and as the game gave it */
@@ -467,24 +473,39 @@ static void vab_apply(unsigned a)
     r_glBindBuffer(0x8892, (unsigned)prev);
 }
 static void (*r_glClearBufferfv)(unsigned, int, const float *);
+static long tl_egl_probe_frame(void);
 static void w_glClearBufferfv(unsigned buf, int drawbuf, const float *v)
 {
     r_glClearBufferfv(buf, drawbuf, v);
-    static long probe = -2; if (probe == -2) probe = getenv("TL_DRAW_PROBE") ? atol(getenv("TL_DRAW_PROBE")) : -1;
+    long probe = tl_egl_probe_frame();
     if (probe > 0 && (long)atomic_load(&E.presented) == probe - 1) {
         int fb = 0, vp[4] = { 0 }; a_glGetIntegerv(0x8CA9, &fb); a_glGetIntegerv(0x0BA2, vp);
         int sc = 0, sb[4] = { 0 }; static unsigned char (*ie)(unsigned); if (!ie) ie = a_eglGetProcAddress("glIsEnabled"); sc = ie ? ie(0x0C11) : 0; a_glGetIntegerv(0x0C10, sb);
         tl_log_line("probe: clear %#x[%d] fb %d to %g %g %g %g (viewport %dx%d, scissor %d %d,%d %dx%d)", buf, drawbuf, fb, v ? v[0] : 0, v ? v[1] : 0, v ? v[2] : 0, v ? v[3] : 0, vp[2], vp[3], sc, sb[0], sb[1], sb[2], sb[3]);
     }
 }
+/* The frame the draw probe looks at: TL_DRAW_PROBE=<swap number>, or one asked for while running (tl_egl_probe_soon: the harness's "probe"). */
+static atomic_long g_probe_at = -2;
+static long tl_egl_probe_frame(void)
+{
+    long v = atomic_load(&g_probe_at);
+    if (v == -2) { v = getenv("TL_DRAW_PROBE") ? atol(getenv("TL_DRAW_PROBE")) : -1; atomic_store(&g_probe_at, v); }
+    return v;
+}
+void tl_egl_probe_soon(void) { atomic_store(&g_probe_at, (long)atomic_load(&E.presented) + 3); }
 /* TL_TEX_TRACE: a draw the driver refuses, with what the emulated vertex streams hold */
 static void (*r_glDrawElements)(unsigned, int, unsigned, const void *);
 static void w_glDrawElements(unsigned mode, int count, unsigned type, const void *idx)
 {
+    { static int skip = -2; if (skip == -2) skip = getenv("TL_SKIP_PROG") ? atoi(getenv("TL_SKIP_PROG")) : -1;   /* debugging: one program's draws left out */
+      if (skip > 0) { int cur = 0; a_glGetIntegerv(0x8B8D, &cur); if (cur == skip) return; } }
     r_glDrawElements(mode, count, type, idx);
     /* TL_DRAW_PROBE=<swap number>: in that frame, after each draw, the pixel at the viewport's centre and what drew it */
-    { static long probe = -2; if (probe == -2) probe = getenv("TL_DRAW_PROBE") ? atol(getenv("TL_DRAW_PROBE")) : -1;
+    { long probe = tl_egl_probe_frame();
       if (probe > 0 && (long)atomic_load(&E.presented) == probe - 1) {
+          static unsigned (*ge0)(void); if (!ge0) ge0 = a_eglGetProcAddress("glGetError");
+          unsigned draw_err = ge0 ? ge0() : 0;
+          if (draw_err) tl_log_line("probe: the draw below failed with %#x", draw_err);
           int fb = 0, prog = 0, vp[4] = { 0 }, t0 = 0, t1 = 0, act = 0; a_glGetIntegerv(0x8CA6, &fb); a_glGetIntegerv(0x8B8D, &prog); a_glGetIntegerv(0x0BA2, vp);
           a_glGetIntegerv(0x84E0, &act);
           static void (*at)(unsigned), (*rp)(int, int, int, int, unsigned, unsigned, void *), (*rb)(unsigned);
@@ -498,6 +519,79 @@ static void w_glDrawElements(unsigned mode, int count, unsigned type, const void
           unsigned (*ge)(void) = a_eglGetProcAddress("glGetError"); unsigned e = ge(); if (e) { rp(vp[0] + vp[2] / 2, vp[1] + vp[3] / 2, 1, 1, 0x1908, 0x1406, pxf); e = ge(); }
           bfb(0x8CA8, (unsigned)rfb);
           tl_log_line("probe: draw %d idx fb %d vp %d,%d %dx%d prog %d tex0 %d tex1 %d -> %d %d %d %d | %g %g %g %g (err %#x)", count, fb, vp[0], vp[1], vp[2], vp[3], prog, t0, t1, px[0], px[1], px[2], px[3], pxf[0], pxf[1], pxf[2], pxf[3], e);
+          { static void (*gfap)(unsigned, unsigned, unsigned, int *); if (!gfap) gfap = a_eglGetProcAddress("glGetFramebufferAttachmentParameteriv");
+            if (gfap && fb) { int ty = 0, nm = 0, dty = 0, dnm = 0; gfap(0x8CA9, 0x8CE0, 0x8CD0, &ty); gfap(0x8CA9, 0x8CE0, 0x8CD1, &nm); gfap(0x8CA9, 0x8D00, 0x8CD0, &dty); gfap(0x8CA9, 0x8D00, 0x8CD1, &dnm);
+              tl_log_line("probe:   fb %d colour0 %s %d, depth %s %d", fb, ty == 0x1702 ? "texture" : ty == 0x8D41 ? "renderbuffer" : ty ? "?" : "none", nm, dty == 0x1702 ? "texture" : dty == 0x8D41 ? "renderbuffer" : dty ? "?" : "none", dnm); ge(); } }
+          { const char *d0 = getenv("TL_PROBE_DUMP0"); static bool d0done;      /* TL_PROBE_DUMP0=<file>: the window's pixels after its first draw */
+            if (d0 && fb == 0 && !d0done) { d0done = true; uint8_t *all = malloc((size_t)vp[2] * vp[3] * 4);
+              if (all) { bfb(0x8CA8, 0); ge(); rp(0, 0, vp[2], vp[3], 0x1908, 0x1401, all); unsigned er = ge(); FILE *df = fopen(d0, "wb");
+                         if (df) { fwrite(&vp[2], 4, 1, df); fwrite(&vp[3], 4, 1, df); fwrite(all, 4, (size_t)vp[2] * vp[3], df); fclose(df); }
+                         tl_log_line("probe: window after prog %d written (error %#x)", prog, er); free(all); bfb(0x8CA8, (unsigned)rfb); } } }
+          /* the packed uniform arrays the program reads: the first vectors of each */
+          { static int (*gl)(unsigned, const char *); static void (*gu)(unsigned, int, float *);
+            if (!gl) { gl = a_eglGetProcAddress("glGetUniformLocation"); gu = a_eglGetProcAddress("glGetUniformfv"); }
+            static const char *const names[] = { "pc0_h", "pc0_m", "pc1_h", "pc1_m", "pc2_h", "pu_h", "vc0_h", "vu_h", NULL };
+            char line[2000]; size_t k = 0;
+            for (int i = 0; names[i] && gl && gu && prog; i++) {
+                int loc = gl((unsigned)prog, names[i]); if (loc < 0) continue;
+                for (int j = 0; j < 8 && k < 1900; j++) { float v[4] = { 0 }; gu((unsigned)prog, loc + j, v); k += (size_t)snprintf(line + k, sizeof(line) - k, " %s[%d]=(%g %g %g %g)", names[i], j, v[0], v[1], v[2], v[3]); }
+            }
+            if (k) tl_log_line("probe:   uniforms%s", line); ge();
+            { char st[800] = ""; size_t sk = 0;
+              for (int a = 0; a < 16 && sk < 760; a++) if (g_vab_attr[a].has) { unsigned b = (unsigned)g_vab_attr[a].binding % 16; sk += (size_t)snprintf(st + sk, sizeof(st) - sk, " a%d:size%d type%#x b%u buf%u off%ld str%d div%d", a, g_vab_attr[a].size, g_vab_attr[a].type, b, g_vab_bind[b].buf, g_vab_bind[b].off + g_vab_attr[a].reloff, g_vab_bind[b].stride, g_vab_bind[b].divisor); }
+              static int (*gal)(unsigned, const char *); if (!gal) gal = a_eglGetProcAddress("glGetAttribLocation");
+              int l0 = gal ? gal((unsigned)prog, "in_ATTRIBUTE0") : -9, l1 = gal ? gal((unsigned)prog, "in_ATTRIBUTE1") : -9;
+              tl_log_line("probe:   attributes (in_ATTRIBUTE0 at %d, in_ATTRIBUTE1 at %d)%s", l0, l1, st);
+              static unsigned char (*ien)(unsigned); static void (*gbv)(unsigned, unsigned char *); if (!ien) { ien = a_eglGetProcAddress("glIsEnabled"); gbv = a_eglGetProcAddress("glGetBooleanv"); }
+              unsigned char cm[4] = { 9, 9, 9, 9 }; if (gbv) gbv(0x0C23 /* COLOR_WRITEMASK */, cm);
+              int bs = 0, bd = 0, be = 0, df = 0; a_glGetIntegerv(0x80C9, &bs); a_glGetIntegerv(0x80C8, &bd); a_glGetIntegerv(0x8009, &be); a_glGetIntegerv(0x0B74, &df);
+              tl_log_line("probe:   blend %d (src %#x dst %#x eq %#x), colour mask %d%d%d%d, depth test %d func %#x, stencil test %d, cull %d, scissor %d",
+                          ien ? ien(0x0BE2) : -1, bs, bd, be, cm[0], cm[1], cm[2], cm[3], ien ? ien(0x0B71) : -1, df, ien ? ien(0x0B90) : -1, ien ? ien(0x0B44) : -1, ien ? ien(0x0C11) : -1); }
+            /* the first texel of each sampler's texture (vs0..vs3, ps0..ps3) */
+            static void (*giv)(unsigned, int, int *), (*gfb)(int, unsigned *), (*dfb)(int, const unsigned *), (*ftx)(unsigned, unsigned, unsigned, unsigned, int);
+            if (!giv) { giv = a_eglGetProcAddress("glGetUniformiv"); gfb = a_eglGetProcAddress("glGenFramebuffers"); dfb = a_eglGetProcAddress("glDeleteFramebuffers"); ftx = a_eglGetProcAddress("glFramebufferTexture2D"); }
+            static const char *const smp[] = { "vs0", "vs1", "ps0", "ps1", "ps2", "ps3", NULL };
+            char tl[1600]; size_t tk = 0;
+            int cur_act = 0, cur_rfb = 0; a_glGetIntegerv(0x84E0, &cur_act); a_glGetIntegerv(0x8CAA, &cur_rfb);
+            for (int i = 0; smp[i] && gl && giv && gfb && prog; i++) {
+                int loc = gl((unsigned)prog, smp[i]); if (loc < 0) continue;
+                int unit = -1; giv((unsigned)prog, loc, &unit); if (unit < 0 || unit > 31) continue;
+                int tex = 0; at(0x84C0 + (unsigned)unit); a_glGetIntegerv(0x8069, &tex);
+                float f[4] = { -1, -1, -1, -1 };
+                if (tex) {
+                    unsigned tmp = 0; gfb(1, &tmp); bfb(0x8CA8, tmp); ftx(0x8CA8, 0x8CE0, 0x0DE1, (unsigned)tex, 0);
+                    ge(); rp(0, 0, 1, 1, 0x1908, 0x1406, f); if (ge()) { uint8_t b[4] = { 0 }; rp(0, 0, 1, 1, 0x1908, 0x1401, b); for (int c = 0; c < 4; c++) f[c] = b[c] / 255.0f; ge(); }
+                    bfb(0x8CA8, (unsigned)cur_rfb); dfb(1, &tmp);
+                }
+                int sw[4] = { 0 }, bl = -1, ml = -1, smp_obj = 0; static void (*gtp)(unsigned, unsigned, int *); static void (*gsp)(unsigned, unsigned, int *);
+                if (!gtp) { gtp = a_eglGetProcAddress("glGetTexParameteriv"); gsp = a_eglGetProcAddress("glGetSamplerParameteriv"); }
+                if (tex && gtp) { for (int c = 0; c < 4; c++) gtp(0x0DE1, 0x8E42 + (unsigned)c, &sw[c]); gtp(0x0DE1, 0x813C, &bl); gtp(0x0DE1, 0x813D, &ml); }
+                a_glGetIntegerv(0x8919 /* SAMPLER_BINDING */, &smp_obj);
+                int smin = 0, smag = 0, scmp = 0; if (smp_obj && gsp) { gsp((unsigned)smp_obj, 0x2801, &smin); gsp((unsigned)smp_obj, 0x2800, &smag); gsp((unsigned)smp_obj, 0x884C, &scmp); }
+                tk += (size_t)snprintf(tl + tk, sizeof(tl) - tk, " %s(unit %d tex %d)=(%g %g %g %g) swz %x,%x,%x,%x lv %d-%d smp %d min %#x mag %#x cmp %#x", smp[i], unit, tex, f[0], f[1], f[2], f[3], sw[0], sw[1], sw[2], sw[3], bl, ml, smp_obj, smin, smag, scmp);
+                /* TL_PROBE_DUMP=<file>: the scene colour the last pass of the frame reads (ps2 of a draw into the window), whole, as floats */
+                const char *dl = getenv("TL_PROBE_DUMP_LUT");    /* the colour grading table the window's pass reads (ps0), as bytes */
+                if (dl && fb == 0 && !strcmp(smp[i], "ps0") && tex) {
+                    static bool ldone; if (!ldone) { ldone = true;
+                        int lw = 1024, lh = 32; uint8_t *lut = malloc((size_t)lw * lh * 4);
+                        unsigned tmp = 0; gfb(1, &tmp); bfb(0x8CA8, tmp); ftx(0x8CA8, 0x8CE0, 0x0DE1, (unsigned)tex, 0); ge();
+                        if (lut) { rp(0, 0, lw, lh, 0x1908, 0x1401, lut); unsigned er = ge(); FILE *df = fopen(dl, "wb"); if (df) { fwrite(lut, 4, (size_t)lw * lh, df); fclose(df); } tl_log_line("probe: LUT texture %d written (error %#x)", tex, er); free(lut); }
+                        bfb(0x8CA8, (unsigned)cur_rfb); dfb(1, &tmp); }
+                }
+                const char *dump = getenv("TL_PROBE_DUMP");
+                if (dump && fb == 0 && !strcmp(smp[i], "ps2") && tex) {
+                    static long done_at = -1; long cur_frame = (long)atomic_load(&E.presented); if (done_at != cur_frame) { done_at = cur_frame;
+                        int w = vp[2], h = vp[3]; float *all = malloc((size_t)w * h * 16);
+                        unsigned tmp = 0; gfb(1, &tmp); bfb(0x8CA8, tmp); ftx(0x8CA8, 0x8CE0, 0x0DE1, (unsigned)tex, 0); ge();
+                        if (all) { rp(0, 0, w, h, 0x1908, 0x1406, all); unsigned er = ge();
+                                   double sum = 0; for (long q = 0; q < (long)w * h; q++) sum += all[q * 4] + all[q * 4 + 1] + all[q * 4 + 2];
+                                   tl_log_line("probe: scene colour average %.5f at frame %ld", sum / ((double)w * h * 3), cur_frame);
+                                   FILE *df = fopen(dump, "wb"); if (df) { fwrite(&w, 4, 1, df); fwrite(&h, 4, 1, df); fwrite(all, 16, (size_t)w * h, df); fclose(df); } tl_log_line("probe: scene colour %dx%d written to %s (error %#x)", w, h, dump, er); free(all); }
+                        bfb(0x8CA8, (unsigned)cur_rfb); dfb(1, &tmp); }
+                }
+            }
+            at((unsigned)cur_act);
+            if (tk) tl_log_line("probe:   textures%s", tl); }
       } }
     static int trace = -1, n; if (trace < 0) trace = getenv("TL_TEX_TRACE") ? 1 : 0;
     if (!trace || n >= 12) return;
