@@ -352,6 +352,9 @@ static void w_glShaderSource(unsigned sh, int count, const char *const *str, con
     }
     const char *one = down; int one_len = (int)strlen(down);
     r_glShaderSource(sh, 1, &one, &one_len);
+    { const char *dir = getenv("TL_GL_SHADER_DUMP_ALL");    /* debugging: every shader as the driver gets it, and as the game gave it */
+      if (dir) { char path[600]; snprintf(path, sizeof(path), "%s/sh-%u.glsl", dir, sh); FILE *f = fopen(path, "w"); if (f) { fputs(down, f); fclose(f); }
+                 snprintf(path, sizeof(path), "%s/sh-%u.orig.glsl", dir, sh); f = fopen(path, "w"); if (f) { fputs(cat, f); fclose(f); } } }
     free(cat); free(down);
 }
 
@@ -360,6 +363,7 @@ static void w_glAttachShader(unsigned prog, unsigned sh)
 {
     if (es31_fake_shader(sh)) { pthread_mutex_lock(&g_es31_mu); fake_add(g_fake_prog, prog); pthread_mutex_unlock(&g_es31_mu); return; }
     r_glAttachShader(prog, sh);
+    if (getenv("TL_GL_SHADER_DUMP_ALL")) tl_log_line("gl: program %u gets shader %u", prog, sh);
     if (!g_es31_shim) return;
     pthread_mutex_lock(&g_es31_mu);
     g_es31_att[g_es31_natt % ES31_ATTACHED].prog = prog; g_es31_att[g_es31_natt % ES31_ATTACHED].shader = sh; g_es31_natt++;
@@ -751,6 +755,11 @@ static void w_glBufferData(unsigned t, long n, const void *d, unsigned u)
 {
     es31_note_storage("glBufferData", t);
     if (!es31_buffers()) { r_glBufferData(t, n, d, u); return; }
+    /* A four-float buffer made empty is, in Unreal, the eye adaptation buffer: a compute shader writes the exposure into it, the
+     * tonemapper reads it. With compute only standing in, it stayed 0 and every frame of the game came out black (FNAF Security
+     * Breach); it starts out as exposure 1 instead. The contents of a buffer made without data are undefined in GL anyway. */
+    static const float k_one[4] = { 1, 1, 1, 1 };
+    if (!d && n == 16 && !getenv("TL_ES31_NO_EXPOSURE_ONE")) d = k_one;
     r_glBufferData(ES31_TBTARGET(ES31_STORAGE(t)), n, d, u);
     unsigned b = buf_on(t);
     for (int k = 0; k < ES31_TB; k++) if (g_tb[k].tex && g_tb[k].buf == b && b) tb_upload(k, true);
