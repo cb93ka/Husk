@@ -1190,7 +1190,9 @@ static void *b_mmap(void *addr, size_t len, int prot, int flags, int fd, long of
      * own code with a hint, writes the machine code, then makes it executable with mprotect -- which on a phone "succeeds" and
      * then faults. An anonymous, code-sized, writable mapping hinted near the region comes from the region instead: its stores
      * go through the writable view (code-write emulation), and mprotect there is a yes. TL_PHONE_JIT=1 does this on a Mac too. */
-    if (addr && !(prot & PROT_EXEC) && (prot & PROT_WRITE) && (flags & 0x20) && !(flags & 0x10) && len <= (32u << 20)
+    /* Only code-sized pieces: LuaJIT's machine code comes in sizemcode chunks (32 or 64 KiB); its heap (lj_alloc, 128 KiB and up) is
+     * mapped with a hint too, and handed the JIT region its stores faulted (SIGBUS in liblua_shared, Garry's Mod loading a map). */
+    if (addr && !(prot & PROT_EXEC) && (prot & PROT_WRITE) && (flags & 0x20) && !(flags & 0x10) && len < (128u << 10)
         && tl_codewrite_enabled() && phone_jit() && tl_xmem_near(addr, 256u << 20)) {
         uint8_t *rx, *rw;
         size_t n = (len + TL_XMEM_PAGE - 1) & ~(size_t)(TL_XMEM_PAGE - 1);
